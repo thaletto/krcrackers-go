@@ -43,8 +43,8 @@ Read from `.env` (shared defaults) and `.env.local` (personal overrides, gitigno
 | `APP_ENV` | `production` if `CLOUDFLARE_API_TOKEN` set, else `development` | |
 | `LOCAL_DB_PATH` | `.data/dev.sqlite` | Used when `APP_ENV=development` |
 | `PORT` | `8080` | |
-| `CLOUDFLARE_API_TOKEN` | — | D1 edit permission. Required for `production`. |
-| `CLOUDFLARE_ACCOUNT_ID` | — | Required for `production`. |
+| `CLOUDFLARE_API_TOKEN` | None | D1 edit permission. Required for `production`. |
+| `CLOUDFLARE_ACCOUNT_ID` | None | Required for `production`. |
 | `CLOUDFLARE_DATABASE_ID` | `735027ae-2327-4561-8e62-538973817b06` | The `krcrackers-products` database. |
 
 Copy `.env.example` to `.env` and fill in the Cloudflare values to talk to prod.
@@ -56,17 +56,17 @@ All endpoints under `/products` use JSON. Errors follow [RFC 7807](https://www.r
 | Method | Path | Body | Returns |
 |---|---|---|---|
 | `POST` | `/products` | `ProductInput` | `201` + `Product` |
-| `GET` | `/products` | — | `200` + `[]Product` |
-| `GET` | `/products/{id}` | — | `200` + `Product`, `404` if missing |
+| `GET` | `/products` | None | `200` + `[]Product` |
+| `GET` | `/products/{id}` | None | `200` + `Product`, `404` if missing |
 | `PUT` | `/products/{id}` | `ProductInput` | `200` + `Product`, `404` if missing |
-| `DELETE` | `/products/{id}` | — | `204`, `404` if missing |
-| `GET` | `/health` | — | `204` |
-| `GET` | `/openapi.json` | — | OpenAPI 3.1 spec |
-| `GET` | `/docs` | — | Stoplight Elements UI |
+| `DELETE` | `/products/{id}` | None | `204`, `404` if missing |
+| `GET` | `/health` | None | `204` |
+| `GET` | `/openapi.json` | None | OpenAPI 3.1 spec |
+| `GET` | `/docs` | None | Stoplight Elements UI |
 
 ### Schema
 
-`ProductInput` (request body) — `name`, `price`, `category`, `comparePrice` are required; `brand`, `description`, `image` are optional and nullable.
+`ProductInput` (request body): `name`, `price`, `category`, `comparePrice` are required; `brand`, `description`, `image` are optional and nullable.
 
 ```json
 {
@@ -101,7 +101,7 @@ Huma validates path params, body, and required fields automatically and returns 
 
 Production: Cloudflare D1, `krcrackers-products` (`735027ae-2327-4561-8e62-538973817b06`), region APAC.
 
-Schema (matches prod exactly — all fields except `id` are nullable):
+Schema (matches prod exactly: all fields except `id` are nullable):
 
 ```sql
 CREATE TABLE products (
@@ -142,7 +142,7 @@ The `database.DB` interface is backend-agnostic. Adding another backend (Postgre
 
 ## Deployment
 
-The Go binary is platform-agnostic. In `production` mode it talks to D1 over HTTPS using the cloudflare-go SDK — no edge runtime needed, just a regular Linux host.
+The Go binary is platform-agnostic. In `production` mode it talks to D1 over HTTPS using the cloudflare-go SDK. No edge runtime needed, just a regular Linux host.
 
 ```sh
 APP_ENV=production \
@@ -152,4 +152,4 @@ CLOUDFLARE_DATABASE_ID=735027ae-2327-4561-8e62-538973817b06 \
   ./app
 ```
 
-If you ever need to deploy a Worker alongside, the `wrangler.toml` is already set up with the D1 binding — just point a `[[d1_databases]]` entry at a Worker and reuse `migrations/`.
+If you ever need to deploy a Worker alongside, the `wrangler.toml` is already set up with the D1 binding. Just point a `[[d1_databases]]` entry at a Worker and reuse `migrations/`.
