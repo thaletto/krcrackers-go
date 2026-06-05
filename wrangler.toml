@@ -1,0 +1,9 @@
+name = "app"
+compatibility_date = "2025-01-01"
+compatibility_flags = ["nodejs_compat"]
+
+[[d1_databases]]
+binding = "DB"
+database_name = "krcrackers-products"
+database_id = "735027ae-2327-4561-8e62-538973817b06"
+migrations_dir = "migrations"
