@@ -1,0 +1,7 @@
+.env
+.data/
+.wrangler/
+*.sqlite
+*.sqlite-journal
+*.sqlite-wal
+*.sqlite-shm
