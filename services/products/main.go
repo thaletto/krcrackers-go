@@ -8,7 +8,6 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/thaletto/krcrackers-go/database"
-	"github.com/thaletto/krcrackers-go/dbconv"
 )
 
 type Service struct {
@@ -203,17 +202,25 @@ func productFromInput(id int, b ProductInput) Product {
 	return Product{ID: id, ProductFields: b.ProductFields}
 }
 
-func rowToProduct(row map[string]any) Product {
+func rowToProduct(row database.Row) Product {
+	id, _ := row.Int("id")
+	name, _ := row.String("name")
+	price, _ := row.Float("price")
+	brand, _ := row.NullableString("brand")
+	description, _ := row.NullableString("description")
+	category, _ := row.String("category")
+	image, _ := row.NullableString("image")
+	comparePrice, _ := row.Float("compare_price")
 	return Product{
-		ID: dbconv.Int(row["id"]),
+		ID: int(id),
 		ProductFields: ProductFields{
-			Name:         dbconv.String(row["name"]),
-			Price:        dbconv.Float(row["price"]),
-			Brand:        dbconv.NullableString(row["brand"]),
-			Description:  dbconv.NullableString(row["description"]),
-			Category:     dbconv.String(row["category"]),
-			Image:        dbconv.NullableString(row["image"]),
-			ComparePrice: dbconv.Float(row["compare_price"]),
+			Name:         name,
+			Price:        price,
+			Brand:        brand,
+			Description:  description,
+			Category:     category,
+			Image:        image,
+			ComparePrice: comparePrice,
 		},
 	}
 }

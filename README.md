@@ -160,7 +160,6 @@ Migrations are managed by the `migrations/` package — see the [Migrations](#mi
 │   ├── database.go            # DB interface + factory (mode → D1 or SQLite)
 │   ├── d1.go                  # Cloudflare D1 backend
 │   └── sqlite.go              # local SQLite backend (modernc.org/sqlite)
-├── dbconv/dbconv.go           # any → primitive coercion for DB rows
 ├── services/
 │   ├── orders/                # placeholder
 │   └── products/main.go       # huma operations + DB access

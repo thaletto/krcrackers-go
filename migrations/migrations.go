@@ -173,24 +173,15 @@ func ensureVersionTable(ctx context.Context, db database.DB) error {
 
 func currentVersion(ctx context.Context, db database.DB) (int64, error) {
 	rows, err := db.Query(ctx,
-		"SELECT COALESCE(MAX(version), 0) FROM "+versionTable)
+		"SELECT COALESCE(MAX(version), 0) AS v FROM "+versionTable)
 	if err != nil {
 		return 0, err
 	}
 	if len(rows) == 0 {
 		return 0, nil
 	}
-	for _, v := range rows[0] {
-		switch x := v.(type) {
-		case int64:
-			return x, nil
-		case float64:
-			return int64(x), nil
-		case int:
-			return int64(x), nil
-		}
-	}
-	return 0, nil
+	v, _ := rows[0].Int("v")
+	return v, nil
 }
 
 func recordApplied(ctx context.Context, db database.DB, version int64) error {
@@ -289,16 +280,8 @@ func GetStatus(ctx context.Context, db database.DB) ([]Status, error) {
 	}
 	applied := make(map[int64]bool)
 	for _, r := range rows {
-		for _, v := range r {
-			switch x := v.(type) {
-			case int64:
-				applied[x] = true
-			case float64:
-				applied[int64(x)] = true
-			case int:
-				applied[int64(x)] = true
-			}
-		}
+		v, _ := r.Int("version")
+		applied[v] = true
 	}
 	out := make([]Status, 0, len(migs))
 	for _, m := range migs {
