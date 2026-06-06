@@ -15,10 +15,69 @@ import (
 
 	"github.com/thaletto/krcrackers-go/config"
 	"github.com/thaletto/krcrackers-go/database"
+	"github.com/thaletto/krcrackers-go/migrations"
 	"github.com/thaletto/krcrackers-go/services/products"
 )
 
 func main() {
+	if len(os.Args) >= 2 && os.Args[1] == "migrate" {
+		if err := runMigrate(os.Args[2:]); err != nil {
+			log.Fatalf("migrate: %v", err)
+		}
+		return
+	}
+	runServer()
+}
+
+func runMigrate(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: migrate <up|down|status>")
+	}
+	cfg, err := config.Load()
+	if err != nil {
+		return err
+	}
+	db, err := database.New(database.Config{
+		Mode:       cfg.AppEnv,
+		APIToken:   cfg.APIToken,
+		AccountID:  cfg.AccountID,
+		DatabaseID: cfg.DatabaseID,
+		LocalPath:  cfg.LocalPath,
+	})
+	if err != nil {
+		return err
+	}
+	defer db.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Minute)
+	defer cancel()
+
+	switch args[0] {
+	case "up":
+		n, err := migrations.Up(ctx, db)
+		if err != nil {
+			return err
+		}
+		log.Printf("migrate: applied %d migration(s)", n)
+	case "down":
+		if err := migrations.Down(ctx, db); err != nil {
+			return err
+		}
+	case "status":
+		statuses, err := migrations.GetStatus(ctx, db)
+		if err != nil {
+			return err
+		}
+		for _, s := range statuses {
+			fmt.Println(s)
+		}
+	default:
+		return fmt.Errorf("unknown migrate subcommand %q (expected up, down, status)", args[0])
+	}
+	return nil
+}
+
+func runServer() {
 	cfg, err := config.Load()
 	if err != nil {
 		log.Fatalf("config: %v", err)
@@ -36,13 +95,7 @@ func main() {
 	}
 	defer db.Close()
 
-	migrateCtx, cancelMigrate := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancelMigrate()
-
 	productsSvc := products.NewService(db)
-	if err := productsSvc.Migrate(migrateCtx); err != nil {
-		log.Fatalf("migrate products: %v", err)
-	}
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("KR Crackers API", "1.0.0")

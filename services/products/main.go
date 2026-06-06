@@ -12,19 +12,6 @@ import (
 	"github.com/thaletto/krcrackers-go/database"
 )
 
-const tableSchema = `
-	CREATE TABLE IF NOT EXISTS products (
-		id INTEGER PRIMARY KEY,
-		name TEXT,
-		price REAL,
-		brand TEXT,
-		description TEXT,
-		category TEXT,
-		image TEXT,
-		compare_price REAL
-	)
-`
-
 type Service struct {
 	db database.DB
 }
@@ -84,13 +71,6 @@ type DeleteProductInput struct {
 
 func NewService(db database.DB) *Service {
 	return &Service{db: db}
-}
-
-func (s *Service) Migrate(ctx context.Context) error {
-	if _, err := s.db.Execute(ctx, tableSchema); err != nil {
-		return fmt.Errorf("creating products table: %w", err)
-	}
-	return nil
 }
 
 func (s *Service) RegisterRoutes(api huma.API) {

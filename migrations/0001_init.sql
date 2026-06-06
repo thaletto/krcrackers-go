@@ -1,3 +1,4 @@
+-- +goose Up
 CREATE TABLE IF NOT EXISTS products (
     id INTEGER PRIMARY KEY,
     name TEXT,
@@ -8,3 +9,6 @@ CREATE TABLE IF NOT EXISTS products (
     image TEXT,
     compare_price REAL
 );
+
+-- +goose Down
+DROP TABLE products;
