@@ -16,13 +16,11 @@ type Config struct {
 	Port       string
 }
 
-// Load reads config from the environment, with .env and .env.local as
-// fallback sources. .env provides shared defaults; .env.local overrides
-// them and is intended for personal overrides (gitignored).
+// Load reads config from the environment, with .env for shared defaults
+// and .env.local for personal overrides (gitignored).
 //
-// APP_ENV defaults to "production" when CLOUDFLARE_API_TOKEN is set,
-// otherwise "development" — so a fresh `go run .` in a clone without
-// secrets just works in dev mode.
+// APP_ENV defaults to "development" unless CLOUDFLARE_API_TOKEN is set,
+// in which case it defaults to "production".
 func Load() (*Config, error) {
 	if err := godotenv.Load(".env"); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("loading .env: %w", err)
