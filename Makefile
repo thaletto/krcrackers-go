@@ -5,7 +5,7 @@ AIR        := $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH 2>/de
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-db run dev watch migrate-up migrate-down migrate-status build test clean wrangler-login
+.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build test clean wrangler-login
 
 help:                ## Show this help message
 	@echo "Targets:"
@@ -23,6 +23,9 @@ run:                 ## Start the dev server (uses .env / .env.local if present)
 	go run .
 
 dev: dev-db run      ## First-time / data-refresh: re-export then start
+
+stop:                ## Kill the running krcracker server (frees port :8080)
+	@pkill -f krcracker && echo "killed" || echo "no krcracker process running"
 
 watch: dev-db        ## Hot reload on .go changes (requires `go install github.com/air-verse/air@latest`)
 	@if [ ! -x "$(AIR)" ]; then \
