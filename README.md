@@ -8,7 +8,7 @@ A small Go HTTP API for KR Crackers. Backed by Cloudflare D1 in production, loca
 - **Cloudflare D1** (SQLite at the edge) in production, **local SQLite** via `modernc.org/sqlite` in dev
 - **huma/v2** for typed handlers + OpenAPI 3.1 generation + Stoplight Elements UI
 - **Wrangler** for local D1 emulation and prod data export
-- **Custom `migrations` package** for versioned schema, run via the `migrate` subcommand
+- **Custom `migrations` package** for versioned schema; version parsing via [`pressly/goose`](https://github.com/pressly/goose), run via the `migrate` subcommand
 
 ## Quick start
 
@@ -65,7 +65,7 @@ CREATE TABLE foo (...);
 DROP TABLE foo;
 ```
 
-The `migrations` package is a small embedded runner. It tracks applied versions in a `schema_migrations` table and applies statements one at a time through the shared `database.DB` interface — so the same runner works for both the local SQLite database and the remote D1 instance, and there's no duplicate schema definition in service code.
+The `migrations` package is a small embedded runner. Version parsing uses `goose.NumericComponent`; section and statement splitting stay local because goose's statement parser is internal and the D1-HTTP runner is the value-add. It tracks applied versions in a `schema_migrations` table and applies statements one at a time through the shared `database.DB` interface — so the same runner works for both the local SQLite database and the remote D1 instance, and there's no duplicate schema definition in service code.
 
 The server no longer auto-migrates on boot. Run migrations explicitly:
 
@@ -157,14 +157,14 @@ Migrations are managed by the `migrations/` package — see the [Migrations](#mi
 ├── main.go                    # server entry, huma setup, lifecycle, migrate subcommand
 ├── config/config.go           # env loading (godotenv, .env.local override)
 ├── database/
-│   ├── database.go            # DB interface + factory (mode → D1 or SQLite)
+│   ├── database.go            # DB interface, Row typed-accessor seam, Config tagged union, factory
 │   ├── d1.go                  # Cloudflare D1 backend
 │   └── sqlite.go              # local SQLite backend (modernc.org/sqlite)
 ├── services/
 │   ├── orders/                # placeholder
-│   └── products/main.go       # huma operations + DB access
+│   └── products/main.go       # huma operations + typed Row accessors
 ├── migrations/
-│   ├── migrations.go          # embedded SQL runner, version tracking
+│   ├── migrations.go          # embedded SQL runner; goose.NumericComponent for version parsing
 │   └── 0001_init.sql          # goose-format schema (Up / Down)
 ├── wrangler.toml              # D1 binding
 ├── Makefile                   # dev-db / run / dev / watch / migrate-*
@@ -172,7 +172,7 @@ Migrations are managed by the `migrations/` package — see the [Migrations](#mi
 └── .env.example               # config template
 ```
 
-The `database.DB` interface is backend-agnostic. Adding another backend (Postgres, in-memory for tests, etc.) is one new file that implements `Query` / `Execute` / `Close` and a switch case in `database.New`.
+The `database.DB` interface and the `Row` typed-accessor interface are both backend-agnostic. Adding another backend (Postgres, in-memory for tests, etc.) is one new file that implements `Query` / `Execute` / `Close` / `Row`, and a switch case in `database.New`.
 
 ## Deployment
 
