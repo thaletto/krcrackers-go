@@ -6,4 +6,3 @@ compatibility_flags = ["nodejs_compat"]
 binding = "DB"
 database_name = "krcrackers-products"
 database_id = "735027ae-2327-4561-8e62-538973817b06"
-migrations_dir = "migrations"

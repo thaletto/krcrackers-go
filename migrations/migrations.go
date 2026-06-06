@@ -5,8 +5,9 @@
 //
 //	NNNN_name.sql
 //
-// where NNNN is a monotonically increasing version number. Each file uses
-// goose-style annotations to delimit the up and down sections:
+// where NNNN is a monotonically increasing version number, parsed via
+// goose.NumericComponent. Each file uses goose-style annotations to
+// delimit the up and down sections:
 //
 //	-- +goose Up
 //	CREATE TABLE foo (...);
@@ -17,7 +18,10 @@
 // The runner tracks applied versions in a small bookkeeping table called
 // `schema_migrations` and executes statements one at a time through the
 // shared database.DB interface, so it works for backends that do not
-// expose a *sql.DB (e.g. Cloudflare D1's HTTP API).
+// expose a *sql.DB (e.g. Cloudflare D1's HTTP API). Only the version
+// parser is delegated to pressly/goose; section and statement splitting
+// stay local because goose's statement parser is internal and the D1
+// runner is the value-add.
 package migrations
 
 import (
@@ -27,8 +31,9 @@ import (
 	"io/fs"
 	"log"
 	"sort"
-	"strconv"
 	"strings"
+
+	"github.com/pressly/goose/v3"
 
 	"github.com/thaletto/krcrackers-go/database"
 )
@@ -96,16 +101,16 @@ func parseFile(name, content string) (migration, error) {
 }
 
 func parseVersion(name string) (int64, string, error) {
-	base := strings.TrimSuffix(name, ".sql")
-	parts := strings.SplitN(base, "_", 2)
-	if len(parts) < 2 {
-		return 0, "", fmt.Errorf("invalid migration filename %q: expected NNNN_name.sql", name)
-	}
-	v, err := strconv.ParseInt(parts[0], 10, 64)
+	v, err := goose.NumericComponent(name)
 	if err != nil {
 		return 0, "", fmt.Errorf("invalid version in %q: %w", name, err)
 	}
-	return v, parts[1], nil
+	base := strings.TrimSuffix(name, ".sql")
+	_, rest, ok := strings.Cut(base, "_")
+	if !ok {
+		return 0, "", fmt.Errorf("invalid migration filename %q: expected NNNN_name.sql", name)
+	}
+	return v, rest, nil
 }
 
 // parseSections splits a migration file into its Up and Down statement lists
