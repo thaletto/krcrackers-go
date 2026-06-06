@@ -1,4 +1,4 @@
-module app
+module github.com/thaletto/krcrackers-go
 
 go 1.26.3
 

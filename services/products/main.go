@@ -9,7 +9,7 @@ import (
 
 	"github.com/danielgtaylor/huma/v2"
 
-	"app/database"
+	"github.com/thaletto/krcrackers-go/database"
 )
 
 const tableSchema = `

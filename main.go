@@ -13,9 +13,9 @@ import (
 	"github.com/danielgtaylor/huma/v2"
 	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
-	"app/config"
-	"app/database"
-	"app/services/products"
+	"github.com/thaletto/krcrackers-go/config"
+	"github.com/thaletto/krcrackers-go/database"
+	"github.com/thaletto/krcrackers-go/services/products"
 )
 
 func main() {
