@@ -29,21 +29,27 @@ func main() {
 	runServer()
 }
 
+func bootstrap() (database.DB, *config.Config, error) {
+	cfg, err := config.Load()
+	if err != nil {
+		return nil, nil, fmt.Errorf("config: %w", err)
+	}
+	db, err := database.New(database.Config{
+		Mode:  cfg.Backend,
+		D1:    cfg.D1,
+		Local: cfg.Local,
+	})
+	if err != nil {
+		return nil, nil, fmt.Errorf("database: %w", err)
+	}
+	return db, cfg, nil
+}
+
 func runMigrate(args []string) error {
 	if len(args) == 0 {
 		return fmt.Errorf("usage: migrate <up|down|status>")
 	}
-	cfg, err := config.Load()
-	if err != nil {
-		return err
-	}
-	db, err := database.New(database.Config{
-		Mode:       cfg.AppEnv,
-		APIToken:   cfg.APIToken,
-		AccountID:  cfg.AccountID,
-		DatabaseID: cfg.DatabaseID,
-		LocalPath:  cfg.LocalPath,
-	})
+	db, _, err := bootstrap()
 	if err != nil {
 		return err
 	}
@@ -78,20 +84,9 @@ func runMigrate(args []string) error {
 }
 
 func runServer() {
-	cfg, err := config.Load()
+	db, cfg, err := bootstrap()
 	if err != nil {
-		log.Fatalf("config: %v", err)
-	}
-
-	db, err := database.New(database.Config{
-		Mode:       cfg.AppEnv,
-		APIToken:   cfg.APIToken,
-		AccountID:  cfg.AccountID,
-		DatabaseID: cfg.DatabaseID,
-		LocalPath:  cfg.LocalPath,
-	})
-	if err != nil {
-		log.Fatalf("database: %v", err)
+		log.Fatal(err)
 	}
 	defer db.Close()
 
@@ -123,7 +118,7 @@ func runServer() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	log.Printf("starting server in %s mode on :%s (docs at /docs)", cfg.AppEnv, cfg.Port)
+	log.Printf("starting server in %s mode on :%s (docs at /docs)", cfg.Backend, cfg.Port)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)

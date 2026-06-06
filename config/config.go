@@ -5,15 +5,15 @@ import (
 	"os"
 
 	"github.com/joho/godotenv"
+
+	"github.com/thaletto/krcrackers-go/database"
 )
 
 type Config struct {
-	AppEnv     string
-	APIToken   string
-	AccountID  string
-	DatabaseID string
-	LocalPath  string
-	Port       string
+	Backend database.Mode
+	D1      *database.D1Config
+	Local   *database.LocalConfig
+	Port    string
 }
 
 // Load reads config from the environment, with .env for shared defaults
@@ -39,12 +39,22 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		AppEnv:     appEnv,
-		APIToken:   os.Getenv("CLOUDFLARE_API_TOKEN"),
-		AccountID:  os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
-		DatabaseID: os.Getenv("CLOUDFLARE_DATABASE_ID"),
-		LocalPath:  getEnv("LOCAL_DB_PATH", ".data/dev.sqlite"),
-		Port:       getEnv("PORT", "8080"),
+		Port: getEnv("PORT", "8080"),
+	}
+
+	switch appEnv {
+	case "production":
+		cfg.Backend = database.ModeD1
+		cfg.D1 = &database.D1Config{
+			APIToken:   os.Getenv("CLOUDFLARE_API_TOKEN"),
+			AccountID:  os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
+			DatabaseID: os.Getenv("CLOUDFLARE_DATABASE_ID"),
+		}
+	case "development", "":
+		cfg.Backend = database.ModeLocal
+		cfg.Local = &database.LocalConfig{Path: getEnv("LOCAL_DB_PATH", ".data/dev.sqlite")}
+	default:
+		return nil, fmt.Errorf("unknown APP_ENV %q (expected %q or %q)", appEnv, "development", "production")
 	}
 
 	return cfg, nil
