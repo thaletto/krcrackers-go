@@ -94,7 +94,29 @@ func (r *sqliteRow) lookup(name string) (any, string, error) {
 	if !ok {
 		return nil, "", fmt.Errorf("database: no column %q", name)
 	}
-	return v, r.types[name], nil
+	t := r.types[name]
+	if t == "" {
+		t = runtimeType(v)
+	}
+	return v, t, nil
+}
+
+// runtimeType maps a scanned Go value to a SQL type name. Used as a
+// fallback when the driver reports an empty type, e.g. for aggregate
+// expressions like MAX() or COALESCE() where the driver does not infer
+// a declared type from the surrounding context.
+func runtimeType(v any) string {
+	switch v.(type) {
+	case nil:
+		return "NULL"
+	case int64, int, int32:
+		return "INTEGER"
+	case float64, float32:
+		return "REAL"
+	case string, []byte:
+		return "TEXT"
+	}
+	return ""
 }
 
 func (r *sqliteRow) Int(name string) (int64, error) {
