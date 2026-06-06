@@ -15,20 +15,9 @@ type Service struct {
 	db database.DB
 }
 
-// Product is the response shape (id populated by the server).
-type Product struct {
-	ID           int     `json:"id" example:"1"`
-	Name         string  `json:"name" example:"Sneaker"`
-	Price        float64 `json:"price" example:"99"`
-	Brand        *string `json:"brand,omitempty" nullable:"true" example:"Acme"`
-	Description  *string `json:"description,omitempty" nullable:"true" example:"Shoes"`
-	Category     string  `json:"category" example:"footwear"`
-	Image        *string `json:"image,omitempty" nullable:"true" example:"/s.png"`
-	ComparePrice float64 `json:"comparePrice" example:"129"`
-}
-
-// ProductInput is the request body for create/update (no id).
-type ProductInput struct {
+// Shared field tags for Product/ProductInput.
+// Exported (huma skips unexported embedded fields), embeds by value (huma skips *).
+type ProductFields struct {
 	Name         string  `json:"name" required:"true" minLength:"1" example:"Sneaker"`
 	Price        float64 `json:"price" required:"true" minimum:"0" example:"99"`
 	Brand        *string `json:"brand,omitempty" nullable:"true" example:"Acme"`
@@ -36,6 +25,17 @@ type ProductInput struct {
 	Category     string  `json:"category" required:"true" minLength:"1" example:"footwear"`
 	Image        *string `json:"image,omitempty" nullable:"true" example:"/s.png"`
 	ComparePrice float64 `json:"comparePrice" required:"true" minimum:"0" example:"129"`
+}
+
+// Product is the response shape (id populated by the server).
+type Product struct {
+	ID int `json:"id" example:"1"`
+	ProductFields
+}
+
+// ProductInput is the request body for create/update (no id).
+type ProductInput struct {
+	ProductFields
 }
 
 type CreateProductInput struct {
@@ -200,27 +200,20 @@ func (s *Service) delete(ctx context.Context, in *DeleteProductInput) (*struct{}
 }
 
 func productFromInput(id int, b ProductInput) Product {
-	return Product{
-		ID:           id,
-		Name:         b.Name,
-		Price:        b.Price,
-		Brand:        b.Brand,
-		Description:  b.Description,
-		Category:     b.Category,
-		Image:        b.Image,
-		ComparePrice: b.ComparePrice,
-	}
+	return Product{ID: id, ProductFields: b.ProductFields}
 }
 
 func rowToProduct(row map[string]any) Product {
 	return Product{
-		ID:           dbconv.Int(row["id"]),
-		Name:         dbconv.String(row["name"]),
-		Price:        dbconv.Float(row["price"]),
-		Brand:        dbconv.NullableString(row["brand"]),
-		Description:  dbconv.NullableString(row["description"]),
-		Category:     dbconv.String(row["category"]),
-		Image:        dbconv.NullableString(row["image"]),
-		ComparePrice: dbconv.Float(row["compare_price"]),
+		ID: dbconv.Int(row["id"]),
+		ProductFields: ProductFields{
+			Name:         dbconv.String(row["name"]),
+			Price:        dbconv.Float(row["price"]),
+			Brand:        dbconv.NullableString(row["brand"]),
+			Description:  dbconv.NullableString(row["description"]),
+			Category:     dbconv.String(row["category"]),
+			Image:        dbconv.NullableString(row["image"]),
+			ComparePrice: dbconv.Float(row["compare_price"]),
+		},
 	}
 }
