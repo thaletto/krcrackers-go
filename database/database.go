@@ -16,32 +16,51 @@ type DB interface {
 	Close() error
 }
 
+type Mode string
+
+const (
+	ModeLocal Mode = "local"
+	ModeD1    Mode = "d1"
+)
+
+type D1Config struct {
+	APIToken   string
+	AccountID  string
+	DatabaseID string
+}
+
+type LocalConfig struct {
+	Path string
+}
+
 type Config struct {
-	Mode       string
+	Mode  Mode
+	D1    *D1Config
+	Local *LocalConfig
+
 	APIToken   string
 	AccountID  string
 	DatabaseID string
 	LocalPath  string
 }
 
-const (
-	ModeProduction  = "production"
-	ModeDevelopment = "development"
-)
-
 func New(cfg Config) (DB, error) {
 	switch cfg.Mode {
-	case ModeProduction:
-		if cfg.APIToken == "" || cfg.AccountID == "" || cfg.DatabaseID == "" {
-			return nil, fmt.Errorf("production mode requires CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID")
+	case ModeD1:
+		if cfg.D1 == nil || cfg.D1.APIToken == "" || cfg.D1.AccountID == "" || cfg.D1.DatabaseID == "" {
+			return nil, fmt.Errorf("d1 mode requires CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID")
 		}
+		cfg.APIToken = cfg.D1.APIToken
+		cfg.AccountID = cfg.D1.AccountID
+		cfg.DatabaseID = cfg.D1.DatabaseID
 		return newD1(cfg)
-	case ModeDevelopment, "":
-		if cfg.LocalPath == "" {
-			return nil, fmt.Errorf("development mode requires LOCAL_DB_PATH")
+	case ModeLocal, "":
+		if cfg.Local == nil || cfg.Local.Path == "" {
+			return nil, fmt.Errorf("local mode requires LOCAL_DB_PATH")
 		}
+		cfg.LocalPath = cfg.Local.Path
 		return newSQLite(cfg)
 	default:
-		return nil, fmt.Errorf("unknown APP_ENV %q (expected %q or %q)", cfg.Mode, ModeDevelopment, ModeProduction)
+		return nil, fmt.Errorf("unknown mode %q (expected %q or %q)", cfg.Mode, ModeLocal, ModeD1)
 	}
 }
