@@ -25,13 +25,13 @@ func newD1(cfg Config) (DB, error) {
 	}, nil
 }
 
-func (c *d1Client) Query(ctx context.Context, sql string, params ...any) ([]map[string]any, error) {
+func (c *d1Client) Query(ctx context.Context, sql string, params ...any) ([]Row, error) {
 	res, err := c.run(ctx, sql, params)
 	if err != nil {
 		return nil, err
 	}
 
-	rows := make([]map[string]any, 0)
+	rows := make([]Row, 0)
 	for _, r := range res.Result {
 		for _, row := range r.Results {
 			m, ok := row.(map[string]any)
@@ -45,7 +45,7 @@ func (c *d1Client) Query(ctx context.Context, sql string, params ...any) ([]map[
 					return nil, err
 				}
 			}
-			rows = append(rows, m)
+			rows = append(rows, &d1Row{values: m})
 		}
 	}
 	return rows, nil
@@ -96,4 +96,84 @@ func paramsToStrings(params []any) []string {
 		}
 	}
 	return out
+}
+
+type d1Row struct {
+	values map[string]any
+}
+
+func (r *d1Row) lookup(name string) (any, error) {
+	v, ok := r.values[name]
+	if !ok {
+		return nil, fmt.Errorf("database: no column %q", name)
+	}
+	return v, nil
+}
+
+func (r *d1Row) Int(name string) (int64, error) {
+	v, err := r.lookup(name)
+	if err != nil {
+		return 0, err
+	}
+	switch x := v.(type) {
+	case nil:
+		return 0, nil
+	case float64:
+		return int64(x), nil
+	case float32:
+		return int64(x), nil
+	case int:
+		return int64(x), nil
+	case int64:
+		return x, nil
+	}
+	return 0, &TypeError{Column: name, Source: fmt.Sprintf("%T", v), Want: "integer"}
+}
+
+func (r *d1Row) Float(name string) (float64, error) {
+	v, err := r.lookup(name)
+	if err != nil {
+		return 0, err
+	}
+	switch x := v.(type) {
+	case nil:
+		return 0, nil
+	case float64:
+		return x, nil
+	case float32:
+		return float64(x), nil
+	case int:
+		return float64(x), nil
+	case int64:
+		return float64(x), nil
+	}
+	return 0, &TypeError{Column: name, Source: fmt.Sprintf("%T", v), Want: "float"}
+}
+
+func (r *d1Row) String(name string) (string, error) {
+	v, err := r.lookup(name)
+	if err != nil {
+		return "", err
+	}
+	if v == nil {
+		return "", nil
+	}
+	if s, ok := v.(string); ok {
+		return s, nil
+	}
+	return "", &TypeError{Column: name, Source: fmt.Sprintf("%T", v), Want: "text"}
+}
+
+func (r *d1Row) NullableString(name string) (*string, error) {
+	v, err := r.lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	if s, ok := v.(string); ok {
+		return &s, nil
+	}
+	return nil, &TypeError{Column: name, Source: fmt.Sprintf("%T", v), Want: "text"}
 }

@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	_ "modernc.org/sqlite"
 )
@@ -32,31 +33,37 @@ func newSQLite(cfg Config) (DB, error) {
 	return &sqliteDB{db: db}, nil
 }
 
-func (s *sqliteDB) Query(ctx context.Context, sql string, params ...any) ([]map[string]any, error) {
+func (s *sqliteDB) Query(ctx context.Context, sql string, params ...any) ([]Row, error) {
 	rows, err := s.db.QueryContext(ctx, sql, params...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 
-	cols, err := rows.Columns()
+	colTypes, err := rows.ColumnTypes()
 	if err != nil {
 		return nil, err
 	}
+	types := make(map[string]string, len(colTypes))
+	cols := make([]string, len(colTypes))
+	for i, ct := range colTypes {
+		cols[i] = ct.Name()
+		types[ct.Name()] = strings.ToUpper(ct.DatabaseTypeName())
+	}
 
-	out := make([]map[string]any, 0)
+	out := make([]Row, 0)
 	for rows.Next() {
-		row := make(map[string]any, len(cols))
-		dest := make([]any, len(cols))
+		vals := make([]any, len(cols))
 		ptrs := make([]any, len(cols))
-		for i := range dest {
-			ptrs[i] = &dest[i]
+		for i := range vals {
+			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			return nil, err
 		}
+		row := &sqliteRow{values: make(map[string]any, len(cols)), types: types}
 		for i, c := range cols {
-			row[c] = dest[i]
+			row.values[c] = vals[i]
 		}
 		out = append(out, row)
 	}
@@ -75,4 +82,136 @@ func (s *sqliteDB) Execute(ctx context.Context, sql string, params ...any) (Resu
 
 func (s *sqliteDB) Close() error {
 	return s.db.Close()
+}
+
+type sqliteRow struct {
+	values map[string]any
+	types  map[string]string
+}
+
+func (r *sqliteRow) lookup(name string) (any, string, error) {
+	v, ok := r.values[name]
+	if !ok {
+		return nil, "", fmt.Errorf("database: no column %q", name)
+	}
+	return v, r.types[name], nil
+}
+
+func (r *sqliteRow) Int(name string) (int64, error) {
+	v, t, err := r.lookup(name)
+	if err != nil {
+		return 0, err
+	}
+	if !isIntegerType(t) {
+		return 0, &TypeError{Column: name, Source: t, Want: "integer"}
+	}
+	return toInt64(v)
+}
+
+func (r *sqliteRow) Float(name string) (float64, error) {
+	v, t, err := r.lookup(name)
+	if err != nil {
+		return 0, err
+	}
+	if !isFloatType(t) {
+		return 0, &TypeError{Column: name, Source: t, Want: "float"}
+	}
+	return toFloat64(v)
+}
+
+func (r *sqliteRow) String(name string) (string, error) {
+	v, t, err := r.lookup(name)
+	if err != nil {
+		return "", err
+	}
+	if !isStringType(t) {
+		return "", &TypeError{Column: name, Source: t, Want: "text"}
+	}
+	if v == nil {
+		return "", nil
+	}
+	if s, ok := v.(string); ok {
+		return s, nil
+	}
+	if b, ok := v.([]byte); ok {
+		return string(b), nil
+	}
+	return "", &TypeError{Column: name, Source: fmt.Sprintf("%T", v), Want: "text"}
+}
+
+func (r *sqliteRow) NullableString(name string) (*string, error) {
+	v, t, err := r.lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	if !isStringType(t) {
+		return nil, &TypeError{Column: name, Source: t, Want: "text"}
+	}
+	if v == nil {
+		return nil, nil
+	}
+	if s, ok := v.(string); ok {
+		return &s, nil
+	}
+	if b, ok := v.([]byte); ok {
+		s := string(b)
+		return &s, nil
+	}
+	return nil, &TypeError{Column: name, Source: fmt.Sprintf("%T", v), Want: "text"}
+}
+
+func isIntegerType(t string) bool {
+	switch t {
+	case "INTEGER", "INT", "INT2", "INT8", "TINYINT", "SMALLINT", "BIGINT", "MEDIUMINT":
+		return true
+	}
+	return false
+}
+
+func isFloatType(t string) bool {
+	switch t {
+	case "REAL", "FLOAT", "DOUBLE", "NUMERIC", "DECIMAL":
+		return true
+	}
+	return false
+}
+
+func isStringType(t string) bool {
+	switch t {
+	case "TEXT", "VARCHAR", "CHAR", "CLOB", "STRING":
+		return true
+	}
+	return false
+}
+
+func toInt64(v any) (int64, error) {
+	switch x := v.(type) {
+	case nil:
+		return 0, nil
+	case int64:
+		return x, nil
+	case int:
+		return int64(x), nil
+	case int32:
+		return int64(x), nil
+	case float64:
+		return int64(x), nil
+	}
+	return 0, &TypeError{Column: "", Source: fmt.Sprintf("%T", v), Want: "integer"}
+}
+
+func toFloat64(v any) (float64, error) {
+	switch x := v.(type) {
+	case nil:
+		return 0, nil
+	case float64:
+		return x, nil
+	case float32:
+		return float64(x), nil
+	case int64:
+		return float64(x), nil
+	case int:
+		return float64(x), nil
+	}
+	return 0, &TypeError{Column: "", Source: fmt.Sprintf("%T", v), Want: "float"}
 }
