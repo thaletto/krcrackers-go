@@ -2,14 +2,13 @@ package products
 
 import (
 	"context"
-	"fmt"
 	"log"
 	"net/http"
-	"strconv"
 
 	"github.com/danielgtaylor/huma/v2"
 
 	"github.com/thaletto/krcrackers-go/database"
+	"github.com/thaletto/krcrackers-go/dbconv"
 )
 
 type Service struct {
@@ -215,65 +214,13 @@ func productFromInput(id int, b ProductInput) Product {
 
 func rowToProduct(row map[string]any) Product {
 	return Product{
-		ID:           toInt(row["id"]),
-		Name:         toString(row["name"]),
-		Price:        toFloat(row["price"]),
-		Brand:        toNullableString(row["brand"]),
-		Description:  toNullableString(row["description"]),
-		Category:     toString(row["category"]),
-		Image:        toNullableString(row["image"]),
-		ComparePrice: toFloat(row["compare_price"]),
+		ID:           dbconv.Int(row["id"]),
+		Name:         dbconv.String(row["name"]),
+		Price:        dbconv.Float(row["price"]),
+		Brand:        dbconv.NullableString(row["brand"]),
+		Description:  dbconv.NullableString(row["description"]),
+		Category:     dbconv.String(row["category"]),
+		Image:        dbconv.NullableString(row["image"]),
+		ComparePrice: dbconv.Float(row["compare_price"]),
 	}
-}
-
-func toInt(v any) int {
-	switch x := v.(type) {
-	case int:
-		return x
-	case int32:
-		return int(x)
-	case int64:
-		return int(x)
-	case float64:
-		return int(x)
-	case string:
-		n, _ := strconv.Atoi(x)
-		return n
-	}
-	return 0
-}
-
-func toFloat(v any) float64 {
-	switch x := v.(type) {
-	case float64:
-		return x
-	case float32:
-		return float64(x)
-	case int:
-		return float64(x)
-	case int64:
-		return float64(x)
-	case string:
-		f, _ := strconv.ParseFloat(x, 64)
-		return f
-	}
-	return 0
-}
-
-func toString(v any) string {
-	if v == nil {
-		return ""
-	}
-	if s, ok := v.(string); ok {
-		return s
-	}
-	return fmt.Sprint(v)
-}
-
-func toNullableString(v any) *string {
-	if v == nil {
-		return nil
-	}
-	s := toString(v)
-	return &s
 }
