@@ -46,8 +46,8 @@ migrate-status:      ## Show applied and pending migrations
 build:               ## Compile all packages
 	go build ./...
 
-build-lambda:        ## Build binary for AWS Lambda (linux/amd64)
-	GOOS=linux GOARCH=amd64 go build -o bootstrap .
+build-lambda:        ## Build binary for AWS Lambda (linux/arm64)
+	GOOS=linux GOARCH=arm64 go build -o bootstrap ./cmd/lambda
 	zip lambda.zip bootstrap
 
 deploy-lambda: build-lambda  ## Deploy to AWS Lambda
