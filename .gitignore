@@ -5,3 +5,5 @@
 *.sqlite-journal
 *.sqlite-wal
 *.sqlite-shm
+bootstrap
+lambda.zip
