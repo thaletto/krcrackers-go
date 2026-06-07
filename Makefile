@@ -5,7 +5,7 @@ AIR        := $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH 2>/de
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build test clean wrangler-login
+.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda test clean wrangler-login
 
 help:                ## Show this help message
 	@echo "Targets:"
@@ -45,6 +45,15 @@ migrate-status:      ## Show applied and pending migrations
 
 build:               ## Compile all packages
 	go build ./...
+
+build-lambda:        ## Build binary for AWS Lambda (linux/arm64)
+	GOOS=linux GOARCH=arm64 go build -o bootstrap ./cmd/lambda
+	zip lambda.zip bootstrap
+
+deploy-lambda: build-lambda  ## Deploy to AWS Lambda
+	aws lambda update-function-code \
+		--function-name krcrackers \
+		--zip-file fileb://lambda.zip
 
 test:                ## Run tests
 	go test ./...
