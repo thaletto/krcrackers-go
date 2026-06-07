@@ -16,6 +16,7 @@ import (
 	"github.com/thaletto/krcrackers-go/config"
 	"github.com/thaletto/krcrackers-go/database"
 	"github.com/thaletto/krcrackers-go/migrations"
+	"github.com/thaletto/krcrackers-go/services/orders"
 	"github.com/thaletto/krcrackers-go/services/products"
 )
 
@@ -91,6 +92,7 @@ func runServer() {
 	defer db.Close()
 
 	productsSvc := products.NewService(db)
+	ordersSvc := orders.NewService(db)
 
 	mux := http.NewServeMux()
 	humaConfig := huma.DefaultConfig("KR Crackers API", "1.0.0")
@@ -101,6 +103,7 @@ func runServer() {
 	api := humago.New(mux, humaConfig)
 
 	productsSvc.RegisterRoutes(api)
+	ordersSvc.RegisterRoutes(api)
 
 	huma.Register(api, huma.Operation{
 		OperationID: "health",
