@@ -10,10 +10,8 @@ import (
 )
 
 type Config struct {
-	Backend database.Mode
-	D1      *database.D1Config
-	Local   *database.LocalConfig
-	Port    string
+	Database database.Config
+	Port     string
 }
 
 // Load reads config from the environment, with .env for shared defaults
@@ -44,15 +42,19 @@ func Load() (*Config, error) {
 
 	switch appEnv {
 	case "production":
-		cfg.Backend = database.ModeD1
-		cfg.D1 = &database.D1Config{
-			APIToken:   os.Getenv("CLOUDFLARE_API_TOKEN"),
-			AccountID:  os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
-			DatabaseID: os.Getenv("CLOUDFLARE_DATABASE_ID"),
+		cfg.Database = database.Config{
+			Mode: database.ModeD1,
+			D1: &database.D1Config{
+				APIToken:   os.Getenv("CLOUDFLARE_API_TOKEN"),
+				AccountID:  os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
+				DatabaseID: os.Getenv("CLOUDFLARE_DATABASE_ID"),
+			},
 		}
 	case "development", "":
-		cfg.Backend = database.ModeLocal
-		cfg.Local = &database.LocalConfig{Path: getEnv("LOCAL_DB_PATH", ".data/dev.sqlite")}
+		cfg.Database = database.Config{
+			Mode:  database.ModeLocal,
+			Local: &database.LocalConfig{Path: getEnv("LOCAL_DB_PATH", ".data/dev.sqlite")},
+		}
 	default:
 		return nil, fmt.Errorf("unknown APP_ENV %q (expected %q or %q)", appEnv, "development", "production")
 	}

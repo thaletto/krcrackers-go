@@ -36,7 +36,18 @@ func (e *TypeError) Error() string {
 type DB interface {
 	Query(ctx context.Context, sql string, params ...any) ([]Row, error)
 	Execute(ctx context.Context, sql string, params ...any) (Result, error)
+	Begin(ctx context.Context) (Tx, error)
 	Close() error
+}
+
+// Tx is a database transaction. Call Commit to persist, Rollback to discard.
+// SQLite adapters wrap *sql.Tx for real atomicity. D1 adapters buffer
+// statements and execute them on Commit (best-effort; not truly atomic).
+type Tx interface {
+	Query(ctx context.Context, sql string, params ...any) ([]Row, error)
+	Execute(ctx context.Context, sql string, params ...any) (Result, error)
+	Commit() error
+	Rollback() error
 }
 
 type Mode string
@@ -60,11 +71,6 @@ type Config struct {
 	Mode  Mode
 	D1    *D1Config
 	Local *LocalConfig
-
-	APIToken   string
-	AccountID  string
-	DatabaseID string
-	LocalPath  string
 }
 
 func New(cfg Config) (DB, error) {
@@ -73,16 +79,12 @@ func New(cfg Config) (DB, error) {
 		if cfg.D1 == nil || cfg.D1.APIToken == "" || cfg.D1.AccountID == "" || cfg.D1.DatabaseID == "" {
 			return nil, fmt.Errorf("d1 mode requires CLOUDFLARE_API_TOKEN, CLOUDFLARE_ACCOUNT_ID, CLOUDFLARE_DATABASE_ID")
 		}
-		cfg.APIToken = cfg.D1.APIToken
-		cfg.AccountID = cfg.D1.AccountID
-		cfg.DatabaseID = cfg.D1.DatabaseID
-		return newD1(cfg)
+		return newD1(cfg.D1)
 	case ModeLocal, "":
 		if cfg.Local == nil || cfg.Local.Path == "" {
 			return nil, fmt.Errorf("local mode requires LOCAL_DB_PATH")
 		}
-		cfg.LocalPath = cfg.Local.Path
-		return newSQLite(cfg)
+		return newSQLite(cfg.Local)
 	default:
 		return nil, fmt.Errorf("unknown mode %q (expected %q or %q)", cfg.Mode, ModeLocal, ModeD1)
 	}
