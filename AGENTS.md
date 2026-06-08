@@ -9,10 +9,6 @@ make test    # go test ./... - always passes (no test files exist yet)
 
 Run `make stop` before `make run` if you suspect a prior server is still bound to `:8080`.
 
-## Huma v2 gotcha: no pointers in input params
-
-Huma v2.38.0 panics with `"pointers are not supported for form/header/path/query parameters"` if you use `*int` (or any `*T`) on input struct fields tagged `query:`, `path:`, `header:`, or `form:`. Only response body fields (`json:`) may be pointers. Use plain value types (`int`, `string`) for all request-side fields.
-
 ## Pagination convention
 
 `limit` and `offset` on `GET /products` are optional `int` query params. A value of `0` (the zero value) means "omitted" - omitting `limit` returns all rows with no `LIMIT` clause. The response wraps items and echoes back the params as nullable pointers:
@@ -26,7 +22,7 @@ Huma v2.38.0 panics with `"pointers are not supported for form/header/path/query
 }
 ```
 
-When the client omits `limit`, `limit` and `offset` are `null` in the response (`*int nullable:"true"`).
+When the client omits `limit`, `limit` and `offset` are omitted from the response (`omitempty`).
 
 ## Database seam
 
@@ -52,14 +48,14 @@ type Service struct { db database.DB }
 
 func NewService(db database.DB) *Service { ... }
 
-func (s *Service) RegisterRoutes(api huma.API) {
-    huma.Register(api, huma.Operation{...}, s.handler)
+func (s *Service) RegisterRoutes(mux *http.ServeMux) {
+    mux.HandleFunc("POST /path", s.handler)
 }
 
-func (s *Service) handler(ctx context.Context, in *Input) (*Output, error) { ... }
+func (s *Service) handler(w http.ResponseWriter, r *http.Request) { ... }
 ```
 
-Register services in `main.go:runServer` via `svc.RegisterRoutes(api)`.
+Register services in `server/handler.go` via `svc.RegisterRoutes(mux)`.
 
 ## Migrations
 
@@ -88,5 +84,5 @@ Use `go doc` to look up types, functions, and packages - it's faster and more re
 ```sh
 go doc database.DB            # interface
 go doc database.Row           # typed row accessor
-go doc products.ListProductsInput  # struct fields + tags
+go doc products.Product       # response struct
 ```

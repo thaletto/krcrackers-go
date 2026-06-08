@@ -1,13 +1,10 @@
 package server
 
 import (
-	"context"
+	"encoding/json"
 	"log"
 	"net/http"
 	"time"
-
-	"github.com/danielgtaylor/huma/v2"
-	"github.com/danielgtaylor/huma/v2/adapters/humago"
 
 	"github.com/thaletto/krcrackers-go/database"
 	"github.com/thaletto/krcrackers-go/services/orders"
@@ -16,36 +13,31 @@ import (
 
 func NewHandler(db database.DB) http.Handler {
 	mux := http.NewServeMux()
-	humaConfig := huma.DefaultConfig("KR Crackers API", "1.0.0")
-	humaConfig.OpenAPI.Info.Description = "KR Crackers API running on Cloudflare D1."
-	api := humago.New(mux, humaConfig)
 
 	productsSvc := products.NewService(db)
 	ordersSvc := orders.NewService(db)
 
-	productsSvc.RegisterRoutes(api)
-	ordersSvc.RegisterRoutes(api)
+	productsSvc.RegisterRoutes(mux)
+	ordersSvc.RegisterRoutes(mux)
 
-	type healthResponse struct {
-		Status  int    `json:"status" example:"200"`
-		Message string `json:"message" example:"ok"`
-	}
-
-	type healthOutput struct {
-		Body healthResponse
-	}
-
-	huma.Register(api, huma.Operation{
-		OperationID: "health",
-		Method:      http.MethodGet,
-		Path:        "/health",
-		Summary:     "Health check",
-		Tags:        []string{"system"},
-	}, func(_ context.Context, _ *struct{}) (*healthOutput, error) {
-		return &healthOutput{Body: healthResponse{Status: 200, Message: "ok"}}, nil
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		writeJSON(w, http.StatusOK, map[string]any{
+			"status":  200,
+			"message": "ok",
+		})
 	})
 
-	return withLogging(api.Adapter())
+	return withLogging(mux)
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 func withLogging(next http.Handler) http.Handler {

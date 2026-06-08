@@ -1,6 +1,6 @@
 # KR Crackers Go Backend
 
-A small Go HTTP API for KR Crackers. Backed by Cloudflare D1 in production, local SQLite in development, with auto-generated OpenAPI docs via [huma](https://github.com/danielgtaylor/huma).
+A small Go HTTP API for KR Crackers. Backed by Cloudflare D1 in production, local SQLite in development.
 
 ## Quick start
 
@@ -8,8 +8,6 @@ A small Go HTTP API for KR Crackers. Backed by Cloudflare D1 in production, loca
 make dev    # export prod D1 + start the dev server
 make watch  # alt: hot reload on .go changes
 ```
-
-Open <http://localhost:8080/docs> for the API UI.
 
 ## Dev commands
 

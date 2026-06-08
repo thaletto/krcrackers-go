@@ -1,11 +1,11 @@
 package products
 
 import (
-	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
-
-	"github.com/danielgtaylor/huma/v2"
+	"strconv"
 
 	"github.com/thaletto/krcrackers-go/database"
 )
@@ -14,141 +14,78 @@ type Service struct {
 	db database.DB
 }
 
-// Shared field tags for Product/ProductInput.
-// Exported (huma skips unexported embedded fields), embeds by value (huma skips *).
 type ProductFields struct {
-	Name         string  `json:"name" required:"true" minLength:"1" example:"Sneaker"`
-	Price        float64 `json:"price" required:"true" minimum:"0" example:"99"`
-	Brand        *string `json:"brand,omitempty" nullable:"true" example:"Acme"`
-	Description  *string `json:"description,omitempty" nullable:"true" example:"Shoes"`
-	Category     string  `json:"category" required:"true" minLength:"1" example:"footwear"`
-	Image        *string `json:"image,omitempty" nullable:"true" example:"/s.png"`
-	ComparePrice float64 `json:"comparePrice" required:"true" minimum:"0" example:"129"`
+	Name         string   `json:"name"`
+	Price        float64  `json:"price"`
+	Brand        *string  `json:"brand,omitempty"`
+	Description  *string  `json:"description,omitempty"`
+	Category     string   `json:"category"`
+	Image        *string  `json:"image,omitempty"`
+	ComparePrice float64  `json:"comparePrice"`
 }
 
-// Product is the response shape (id populated by the server).
 type Product struct {
-	ID int `json:"id" example:"1"`
+	ID int `json:"id"`
 	ProductFields
 }
 
-// ProductInput is the request body for create/update (no id).
 type ProductInput struct {
 	ProductFields
 }
 
-type CreateProductInput struct {
-	Body ProductInput
-}
-type CreateProductOutput struct {
-	Body Product
-}
-
-type ListProductsInput struct {
-	Limit  int `query:"limit" required:"false" maximum:"100" example:"20"`
-	Offset int `query:"offset" required:"false" minimum:"0" example:"0"`
-}
-
 type ListProductsResponse struct {
 	Items  []Product `json:"items"`
-	Total  int       `json:"total" example:"100"`
-	Limit  *int      `json:"limit" nullable:"true" example:"20"`
-	Offset *int      `json:"offset" nullable:"true" example:"0"`
-}
-
-type ListProductsOutput struct {
-	Body ListProductsResponse
-}
-
-type GetProductInput struct {
-	ID int `path:"id" required:"true" minimum:"1" example:"1"`
-}
-type GetProductOutput struct {
-	Body Product
-}
-
-type UpdateProductInput struct {
-	ID   int `path:"id" required:"true" minimum:"1" example:"1"`
-	Body ProductInput
-}
-type UpdateProductOutput struct {
-	Body Product
-}
-
-type DeleteProductInput struct {
-	ID int `path:"id" required:"true" minimum:"1" example:"1"`
+	Total  int       `json:"total"`
+	Limit  *int      `json:"limit,omitempty"`
+	Offset *int      `json:"offset,omitempty"`
 }
 
 func NewService(db database.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) RegisterRoutes(api huma.API) {
-	huma.Register(api, huma.Operation{
-		OperationID: "create-product",
-		Method:      http.MethodPost,
-		Path:        "/products",
-		Summary:     "Create a product",
-		Description: "Adds a new product to the catalog.",
-		Tags:        []string{"products"},
-	}, s.create)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "list-products",
-		Method:      http.MethodGet,
-		Path:        "/products",
-		Summary:     "List products",
-		Description: "Returns a page of products ordered by id. Use `limit` and `offset` query parameters to paginate; the response includes the total row count.",
-		Tags:        []string{"products"},
-	}, s.list)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-product",
-		Method:      http.MethodGet,
-		Path:        "/products/{id}",
-		Summary:     "Get a product",
-		Description: "Returns a single product by id.",
-		Tags:        []string{"products"},
-	}, s.get)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "update-product",
-		Method:      http.MethodPut,
-		Path:        "/products/{id}",
-		Summary:     "Update a product",
-		Description: "Replaces an existing product. Returns 404 if the product does not exist.",
-		Tags:        []string{"products"},
-	}, s.update)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "delete-product",
-		Method:      http.MethodDelete,
-		Path:        "/products/{id}",
-		Summary:     "Delete a product",
-		Description: "Removes a product from the catalog. Returns 404 if the product does not exist.",
-		Tags:        []string{"products"},
-	}, s.delete)
+func (s *Service) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /products", s.create)
+	mux.HandleFunc("GET /products", s.list)
+	mux.HandleFunc("GET /products/{id}", s.get)
+	mux.HandleFunc("PUT /products/{id}", s.update)
+	mux.HandleFunc("DELETE /products/{id}", s.delete)
 }
 
-func (s *Service) create(ctx context.Context, in *CreateProductInput) (*CreateProductOutput, error) {
-	b := in.Body
-	res, err := s.db.Execute(ctx, `
-		INSERT INTO products (name, price, brand, description, category, image, compare_price)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, b.Name, b.Price, b.Brand, b.Description, b.Category, b.Image, b.ComparePrice)
-	if err != nil {
-		log.Printf("insert product: %v", err)
-		return nil, huma.Error500InternalServerError("failed to create product")
+func (s *Service) create(w http.ResponseWriter, r *http.Request) {
+	var input ProductInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validateProductInput(input); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
 	}
 
-	return &CreateProductOutput{Body: productFromInput(int(res.LastInsertID), b)}, nil
+	res, err := s.db.Execute(r.Context(), `
+		INSERT INTO products (name, price, brand, description, category, image, compare_price)
+		VALUES (?, ?, ?, ?, ?, ?, ?)
+	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice)
+	if err != nil {
+		log.Printf("insert product: %v", err)
+		writeError(w, http.StatusInternalServerError, "failed to create product")
+		return
+	}
+
+	writeJSON(w, http.StatusCreated, productFromInput(int(res.LastInsertID), input))
 }
 
-func (s *Service) list(ctx context.Context, in *ListProductsInput) (*ListProductsOutput, error) {
-	countRows, err := s.db.Query(ctx, `SELECT COUNT(*) AS total FROM products`)
+func (s *Service) list(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+
+	countRows, err := s.db.Query(r.Context(), `SELECT COUNT(*) AS total FROM products`)
 	if err != nil {
 		log.Printf("count products: %v", err)
-		return nil, huma.Error500InternalServerError("failed to list products")
+		writeError(w, http.StatusInternalServerError, "failed to list products")
+		return
 	}
 	total := 0
 	if len(countRows) > 0 {
@@ -162,82 +99,116 @@ func (s *Service) list(ctx context.Context, in *ListProductsInput) (*ListProduct
 		FROM products
 		ORDER BY id
 	`
-	queryArgs := []any{}
-	if in.Limit > 0 {
+	var queryArgs []any
+	if limit > 0 {
 		query += " LIMIT ? OFFSET ?"
-		queryArgs = append(queryArgs, in.Limit, in.Offset)
+		queryArgs = append(queryArgs, limit, offset)
 	}
 
-	rows, err := s.db.Query(ctx, query, queryArgs...)
+	rows, err := s.db.Query(r.Context(), query, queryArgs...)
 	if err != nil {
 		log.Printf("list products: %v", err)
-		return nil, huma.Error500InternalServerError("failed to list products")
+		writeError(w, http.StatusInternalServerError, "failed to list products")
+		return
 	}
 
 	var limitPtr, offsetPtr *int
-	if in.Limit > 0 {
-		limitPtr = &in.Limit
-		offsetPtr = &in.Offset
+	if limit > 0 {
+		limitPtr = &limit
+		offsetPtr = &offset
 	}
 
 	items := make([]Product, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, rowToProduct(row))
 	}
-	return &ListProductsOutput{Body: ListProductsResponse{
+	writeJSON(w, http.StatusOK, ListProductsResponse{
 		Items:  items,
 		Total:  total,
 		Limit:  limitPtr,
 		Offset: offsetPtr,
-	}}, nil
+	})
 }
 
-func (s *Service) get(ctx context.Context, in *GetProductInput) (*GetProductOutput, error) {
-	rows, err := s.db.Query(ctx, `
+func (s *Service) get(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid product id")
+		return
+	}
+
+	rows, err := s.db.Query(r.Context(), `
 		SELECT id, name, price, brand, description, category, image, compare_price
 		FROM products WHERE id = ?
-	`, in.ID)
+	`, id)
 	if err != nil {
-		log.Printf("get product %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to get product")
+		log.Printf("get product %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to get product")
+		return
 	}
 
 	if len(rows) == 0 {
-		return nil, huma.Error404NotFound("product not found")
+		writeError(w, http.StatusNotFound, "product not found")
+		return
 	}
 
-	return &GetProductOutput{Body: rowToProduct(rows[0])}, nil
+	writeJSON(w, http.StatusOK, rowToProduct(rows[0]))
 }
 
-func (s *Service) update(ctx context.Context, in *UpdateProductInput) (*UpdateProductOutput, error) {
-	b := in.Body
-	res, err := s.db.Execute(ctx, `
+func (s *Service) update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid product id")
+		return
+	}
+
+	var input ProductInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validateProductInput(input); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	res, err := s.db.Execute(r.Context(), `
 		UPDATE products
 		SET name = ?, price = ?, brand = ?, description = ?, category = ?, image = ?, compare_price = ?
 		WHERE id = ?
-	`, b.Name, b.Price, b.Brand, b.Description, b.Category, b.Image, b.ComparePrice, in.ID)
+	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice, id)
 	if err != nil {
-		log.Printf("update product %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to update product")
+		log.Printf("update product %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to update product")
+		return
 	}
 
 	if res.RowsAffected == 0 {
-		return nil, huma.Error404NotFound("product not found")
+		writeError(w, http.StatusNotFound, "product not found")
+		return
 	}
 
-	return &UpdateProductOutput{Body: productFromInput(in.ID, b)}, nil
+	writeJSON(w, http.StatusOK, productFromInput(id, input))
 }
 
-func (s *Service) delete(ctx context.Context, in *DeleteProductInput) (*struct{}, error) {
-	res, err := s.db.Execute(ctx, `DELETE FROM products WHERE id = ?`, in.ID)
+func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		log.Printf("delete product %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to delete product")
+		writeError(w, http.StatusBadRequest, "invalid product id")
+		return
+	}
+
+	res, err := s.db.Execute(r.Context(), `DELETE FROM products WHERE id = ?`, id)
+	if err != nil {
+		log.Printf("delete product %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to delete product")
+		return
 	}
 	if res.RowsAffected == 0 {
-		return nil, huma.Error404NotFound("product not found")
+		writeError(w, http.StatusNotFound, "product not found")
+		return
 	}
-	return nil, nil
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func productFromInput(id int, b ProductInput) Product {
@@ -265,4 +236,27 @@ func rowToProduct(row database.Row) Product {
 			ComparePrice: comparePrice,
 		},
 	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func validateProductInput(p ProductInput) error {
+	if p.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if p.Price < 0 {
+		return fmt.Errorf("price must be >= 0")
+	}
+	if p.Category == "" {
+		return fmt.Errorf("category is required")
+	}
+	return nil
 }

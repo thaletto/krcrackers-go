@@ -2,15 +2,17 @@
 
 ```
 .
-├── main.go                    # server entry, huma setup, lifecycle, migrate subcommand
+├── main.go                    # server entry, lifecycle, migrate subcommand
 ├── config/config.go           # env loading (godotenv, .env.local override)
 ├── database/
 │   ├── database.go            # DB interface, Row typed-accessor seam, Config tagged union, factory
 │   ├── d1.go                  # Cloudflare D1 backend
 │   └── sqlite.go              # local SQLite backend (modernc.org/sqlite)
+├── server/
+│   └── handler.go             # route registration, logging middleware, JSON helpers
 ├── services/
-│   ├── orders/                # placeholder
-│   └── products/main.go       # huma operations + typed Row accessors
+│   ├── orders/main.go         # net/http handlers + typed Row accessors
+│   └── products/main.go       # net/http handlers + typed Row accessors
 ├── migrations/
 │   ├── migrations.go          # embedded SQL runner; goose.NumericComponent for version parsing
 │   └── 0001_init.sql          # goose-format schema (Up / Down)
