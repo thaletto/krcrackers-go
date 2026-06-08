@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/thaletto/krcrackers-go/serverutil"
+	"github.com/thaletto/krcrackers-go/server"
 )
 
 type Service struct {
@@ -54,21 +54,21 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 	var input ProductInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := validateProductInput(input); err != nil {
-		serverutil.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
 	product, err := s.repo.Create(r.Context(), input)
 	if err != nil {
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to create product")
+		server.WriteError(w, http.StatusInternalServerError, "failed to create product")
 		return
 	}
 
-	serverutil.WriteJSON(w, http.StatusCreated, product)
+	server.WriteJSON(w, http.StatusCreated, product)
 }
 
 func (s *Service) list(w http.ResponseWriter, r *http.Request) {
@@ -78,76 +78,76 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.repo.List(r.Context(), limit, offset)
 	if err != nil {
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to list products")
+		server.WriteError(w, http.StatusInternalServerError, "failed to list products")
 		return
 	}
 
-	serverutil.WriteJSON(w, http.StatusOK, resp)
+	server.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *Service) get(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid product id")
+		server.WriteError(w, http.StatusBadRequest, "invalid product id")
 		return
 	}
 
 	product, err := s.repo.Get(r.Context(), id)
 	if err != nil {
 		if err.Error() == "product not found" {
-			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to get product")
+		server.WriteError(w, http.StatusInternalServerError, "failed to get product")
 		return
 	}
 
-	serverutil.WriteJSON(w, http.StatusOK, product)
+	server.WriteJSON(w, http.StatusOK, product)
 }
 
 func (s *Service) update(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid product id")
+		server.WriteError(w, http.StatusBadRequest, "invalid product id")
 		return
 	}
 
 	var input ProductInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := validateProductInput(input); err != nil {
-		serverutil.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
 	product, err := s.repo.Update(r.Context(), id, input)
 	if err != nil {
 		if err.Error() == "product not found" {
-			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to update product")
+		server.WriteError(w, http.StatusInternalServerError, "failed to update product")
 		return
 	}
 
-	serverutil.WriteJSON(w, http.StatusOK, product)
+	server.WriteJSON(w, http.StatusOK, product)
 }
 
 func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid product id")
+		server.WriteError(w, http.StatusBadRequest, "invalid product id")
 		return
 	}
 
 	if err := s.repo.Delete(r.Context(), id); err != nil {
 		if err.Error() == "product not found" {
-			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to delete product")
+		server.WriteError(w, http.StatusInternalServerError, "failed to delete product")
 		return
 	}
 

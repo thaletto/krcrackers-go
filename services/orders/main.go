@@ -6,7 +6,7 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/thaletto/krcrackers-go/serverutil"
+	"github.com/thaletto/krcrackers-go/server"
 )
 
 type Service struct {
@@ -73,21 +73,21 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 	var input OrderInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := validateOrderInput(input); err != nil {
-		serverutil.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
 	order, err := s.repo.Create(r.Context(), input)
 	if err != nil {
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to create order")
+		server.WriteError(w, http.StatusInternalServerError, "failed to create order")
 		return
 	}
 
-	serverutil.WriteJSON(w, http.StatusCreated, order)
+	server.WriteJSON(w, http.StatusCreated, order)
 }
 
 func (s *Service) list(w http.ResponseWriter, r *http.Request) {
@@ -97,76 +97,76 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 
 	resp, err := s.repo.List(r.Context(), limit, offset)
 	if err != nil {
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to list orders")
+		server.WriteError(w, http.StatusInternalServerError, "failed to list orders")
 		return
 	}
 
-	serverutil.WriteJSON(w, http.StatusOK, resp)
+	server.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *Service) get(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid order id")
+		server.WriteError(w, http.StatusBadRequest, "invalid order id")
 		return
 	}
 
 	order, err := s.repo.Get(r.Context(), id)
 	if err != nil {
 		if err.Error() == "order not found" {
-			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to get order")
+		server.WriteError(w, http.StatusInternalServerError, "failed to get order")
 		return
 	}
 
-	serverutil.WriteJSON(w, http.StatusOK, order)
+	server.WriteJSON(w, http.StatusOK, order)
 }
 
 func (s *Service) update(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid order id")
+		server.WriteError(w, http.StatusBadRequest, "invalid order id")
 		return
 	}
 
 	var input OrderInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid request body")
+		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := validateOrderInput(input); err != nil {
-		serverutil.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
 	order, err := s.repo.Update(r.Context(), id, input)
 	if err != nil {
 		if err.Error() == "order not found" {
-			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to update order")
+		server.WriteError(w, http.StatusInternalServerError, "failed to update order")
 		return
 	}
 
-	serverutil.WriteJSON(w, http.StatusOK, order)
+	server.WriteJSON(w, http.StatusOK, order)
 }
 
 func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		serverutil.WriteError(w, http.StatusBadRequest, "invalid order id")
+		server.WriteError(w, http.StatusBadRequest, "invalid order id")
 		return
 	}
 
 	if err := s.repo.Delete(r.Context(), id); err != nil {
 		if err.Error() == "order not found" {
-			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
-		serverutil.WriteError(w, http.StatusInternalServerError, "failed to delete order")
+		server.WriteError(w, http.StatusInternalServerError, "failed to delete order")
 		return
 	}
 

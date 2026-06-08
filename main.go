@@ -14,6 +14,8 @@ import (
 	"github.com/thaletto/krcrackers-go/database"
 	"github.com/thaletto/krcrackers-go/migrations"
 	"github.com/thaletto/krcrackers-go/server"
+	"github.com/thaletto/krcrackers-go/services/orders"
+	"github.com/thaletto/krcrackers-go/services/products"
 )
 
 func main() {
@@ -87,7 +89,7 @@ func runServer() {
 	}
 	defer db.Close()
 
-	handler := server.NewHandler(db)
+	handler := newHandler(db)
 
 	srv := &http.Server{
 		Addr:              ":" + cfg.Port,
@@ -112,4 +114,23 @@ func runServer() {
 	if err := srv.Shutdown(shutdownCtx); err != nil {
 		log.Printf("shutdown: %v", err)
 	}
+}
+
+func newHandler(db database.DB) http.Handler {
+	mux := http.NewServeMux()
+
+	productsSvc := products.NewService(products.NewRepository(db))
+	ordersSvc := orders.NewService(orders.NewRepository(db))
+
+	productsSvc.RegisterRoutes(mux)
+	ordersSvc.RegisterRoutes(mux)
+
+	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
+		server.WriteJSON(w, http.StatusOK, map[string]any{
+			"status":  200,
+			"message": "ok",
+		})
+	})
+
+	return server.WithLogging(mux)
 }

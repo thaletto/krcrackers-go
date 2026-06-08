@@ -75,7 +75,7 @@ func (s *Service) handler(w http.ResponseWriter, r *http.Request) { ... }
 
 Register services in `server/handler.go` via `svc.RegisterRoutes(mux)`.
 
-Shared HTTP helpers (`WriteJSON`, `WriteError`) live in `serverutil/respond.go` to avoid import cycles.
+Shared HTTP helpers (`WriteJSON`, `WriteError`, `WithLogging`) live in `server/server.go`. Handler wiring lives in `main.go` and `cmd/lambda/main.go` to avoid import cycles between `server` and service packages.
 
 ## Migrations
 
