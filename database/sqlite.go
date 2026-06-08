@@ -15,14 +15,14 @@ type sqliteDB struct {
 	db *sql.DB
 }
 
-func newSQLite(cfg Config) (DB, error) {
-	if dir := filepath.Dir(cfg.LocalPath); dir != "" && dir != "." {
+func newSQLite(cfg *LocalConfig) (DB, error) {
+	if dir := filepath.Dir(cfg.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating db dir: %w", err)
 		}
 	}
 
-	db, err := sql.Open("sqlite", cfg.LocalPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", cfg.Path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}
@@ -80,8 +80,75 @@ func (s *sqliteDB) Execute(ctx context.Context, sql string, params ...any) (Resu
 	return Result{LastInsertID: id, RowsAffected: affected}, nil
 }
 
+func (s *sqliteDB) Begin(ctx context.Context) (Tx, error) {
+	tx, err := s.db.BeginTx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	return &sqliteTx{tx: tx}, nil
+}
+
 func (s *sqliteDB) Close() error {
 	return s.db.Close()
+}
+
+type sqliteTx struct {
+	tx *sql.Tx
+}
+
+func (t *sqliteTx) Query(ctx context.Context, sql string, params ...any) ([]Row, error) {
+	rows, err := t.tx.QueryContext(ctx, sql, params...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	colTypes, err := rows.ColumnTypes()
+	if err != nil {
+		return nil, err
+	}
+	types := make(map[string]string, len(colTypes))
+	cols := make([]string, len(colTypes))
+	for i, ct := range colTypes {
+		cols[i] = ct.Name()
+		types[ct.Name()] = strings.ToUpper(ct.DatabaseTypeName())
+	}
+
+	out := make([]Row, 0)
+	for rows.Next() {
+		vals := make([]any, len(cols))
+		ptrs := make([]any, len(cols))
+		for i := range vals {
+			ptrs[i] = &vals[i]
+		}
+		if err := rows.Scan(ptrs...); err != nil {
+			return nil, err
+		}
+		row := &sqliteRow{values: make(map[string]any, len(cols)), types: types}
+		for i, c := range cols {
+			row.values[c] = vals[i]
+		}
+		out = append(out, row)
+	}
+	return out, rows.Err()
+}
+
+func (t *sqliteTx) Execute(ctx context.Context, sql string, params ...any) (Result, error) {
+	res, err := t.tx.ExecContext(ctx, sql, params...)
+	if err != nil {
+		return Result{}, err
+	}
+	id, _ := res.LastInsertId()
+	affected, _ := res.RowsAffected()
+	return Result{LastInsertID: id, RowsAffected: affected}, nil
+}
+
+func (t *sqliteTx) Commit() error {
+	return t.tx.Commit()
+}
+
+func (t *sqliteTx) Rollback() error {
+	return t.tx.Rollback()
 }
 
 type sqliteRow struct {
