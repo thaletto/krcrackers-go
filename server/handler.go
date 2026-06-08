@@ -27,7 +27,8 @@ func NewHandler(db database.DB) http.Handler {
 	ordersSvc.RegisterRoutes(api)
 
 	type healthResponse struct {
-		Status string `json:"status" example:"ok"`
+		Status int    `json:"status" example:"200"`
+		Message string `json:"message" example:"ok"`
 	}
 
 	huma.Register(api, huma.Operation{
@@ -37,7 +38,7 @@ func NewHandler(db database.DB) http.Handler {
 		Summary:     "Health check",
 		Tags:        []string{"system"},
 	}, func(_ context.Context, _ *struct{}) (*healthResponse, error) {
-		return &healthResponse{Status: "ok"}, nil
+		return &healthResponse{Status: 200, Message: "ok"}, nil
 	})
 
 	return withLogging(api.Adapter())
