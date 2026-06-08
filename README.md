@@ -28,9 +28,6 @@ make clean            # rm -rf .data .wrangler
 
 ## Docs
 
-- [Configuration](docs/configuration.md)
 - [API](docs/api.md)
-- [Migrations](docs/migrations.md)
-- [Database](docs/database.md)
-- [Project structure](docs/project-structure.md)
 - [Deployment](docs/deployment.md)
+- [Codebase overview](docs/codebase/)
