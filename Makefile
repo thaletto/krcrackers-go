@@ -53,6 +53,7 @@ build-lambda:        ## Build binary for AWS Lambda (linux/arm64)
 deploy-lambda: build-lambda  ## Deploy to AWS Lambda
 	aws lambda update-function-code \
 		--function-name krcrackers \
+		--region ap-south-1 \
 		--zip-file fileb://lambda.zip
 
 test:                ## Run tests
