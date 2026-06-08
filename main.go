@@ -95,7 +95,7 @@ func runServer() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	log.Printf("starting server in %s mode on :%s (docs at /docs)", cfg.Backend, cfg.Port)
+	log.Printf("starting server in %s mode on :%s", cfg.Backend, cfg.Port)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)

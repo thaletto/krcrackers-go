@@ -1,11 +1,11 @@
 package orders
 
 import (
-	"context"
+	"encoding/json"
+	"fmt"
 	"log"
 	"net/http"
-
-	"github.com/danielgtaylor/huma/v2"
+	"strconv"
 
 	"github.com/thaletto/krcrackers-go/database"
 )
@@ -15,172 +15,114 @@ type Service struct {
 }
 
 type OrderItemFields struct {
-	ProductID   int     `json:"productId" required:"true" minimum:"1" example:"1"`
-	ProductName string  `json:"productName" required:"true" minLength:"1" example:"Sneaker"`
-	Price       float64 `json:"price" required:"true" minimum:"0" example:"99"`
-	Quantity    int     `json:"quantity" required:"true" minimum:"1" example:"2"`
-	Total       float64 `json:"total" required:"true" minimum:"0" example:"198"`
+	ProductID   int     `json:"productId"`
+	ProductName string  `json:"productName"`
+	Price       float64 `json:"price"`
+	Quantity    int     `json:"quantity"`
+	Total       float64 `json:"total"`
 }
 
 type OrderItem struct {
-	ID int `json:"id" example:"1"`
+	ID int `json:"id"`
 	OrderItemFields
 }
 
 type OrderFields struct {
-	UserName         string  `json:"userName" required:"true" minLength:"1" example:"John Doe"`
-	Email            string  `json:"email" required:"true" minLength:"1" example:"john@example.com"`
-	Phone            string  `json:"phone" required:"true" minLength:"1" example:"9876543210"`
-	Street           string  `json:"street" required:"true" minLength:"1" example:"123 Main St"`
-	TownOrCity       string  `json:"townOrCity" required:"true" minLength:"1" example:"Mumbai"`
-	State            string  `json:"state" required:"true" minLength:"1" example:"Maharashtra"`
-	Pincode          string  `json:"pincode" required:"true" minLength:"1" example:"400001"`
-	Notes            *string `json:"notes,omitempty" nullable:"true" example:"Ring the doorbell"`
-	DeliveryRegion   string  `json:"deliveryRegion" required:"true" minLength:"1" example:"West"`
-	DeliveryLocation string  `json:"deliveryLocation" required:"true" minLength:"1" example:"Front Door"`
-	Total            float64 `json:"total" required:"true" minimum:"0" example:"297"`
+	UserName         string   `json:"userName"`
+	Email            string   `json:"email"`
+	Phone            string   `json:"phone"`
+	Street           string   `json:"street"`
+	TownOrCity       string   `json:"townOrCity"`
+	State            string   `json:"state"`
+	Pincode          string   `json:"pincode"`
+	Notes            *string  `json:"notes,omitempty"`
+	DeliveryRegion   string   `json:"deliveryRegion"`
+	DeliveryLocation string   `json:"deliveryLocation"`
+	Total            float64  `json:"total"`
 }
 
 type Order struct {
-	ID int `json:"id" example:"1"`
+	ID int `json:"id"`
 	OrderFields
 	Items []OrderItem `json:"items"`
 }
 
 type OrderInput struct {
 	OrderFields
-	Items []OrderItemFields `json:"items" required:"true" minItems:"1"`
-}
-
-type CreateOrderInput struct {
-	Body OrderInput
-}
-type CreateOrderOutput struct {
-	Body Order
-}
-
-type ListOrdersInput struct {
-	Limit  int `query:"limit" required:"false" maximum:"100" example:"20"`
-	Offset int `query:"offset" required:"false" minimum:"0" example:"0"`
+	Items []OrderItemFields `json:"items"`
 }
 
 type ListOrdersResponse struct {
 	Items  []Order `json:"items"`
-	Total  int     `json:"total" example:"100"`
-	Limit  *int    `json:"limit" nullable:"true" example:"20"`
-	Offset *int    `json:"offset" nullable:"true" example:"0"`
-}
-
-type ListOrdersOutput struct {
-	Body ListOrdersResponse
-}
-
-type GetOrderInput struct {
-	ID int `path:"id" required:"true" minimum:"1" example:"1"`
-}
-type GetOrderOutput struct {
-	Body Order
-}
-
-type UpdateOrderInput struct {
-	ID   int `path:"id" required:"true" minimum:"1" example:"1"`
-	Body OrderInput
-}
-type UpdateOrderOutput struct {
-	Body Order
-}
-
-type DeleteOrderInput struct {
-	ID int `path:"id" required:"true" minimum:"1" example:"1"`
+	Total  int     `json:"total"`
+	Limit  *int    `json:"limit,omitempty"`
+	Offset *int    `json:"offset,omitempty"`
 }
 
 func NewService(db database.DB) *Service {
 	return &Service{db: db}
 }
 
-func (s *Service) RegisterRoutes(api huma.API) {
-	huma.Register(api, huma.Operation{
-		OperationID: "create-order",
-		Method:      http.MethodPost,
-		Path:        "/orders",
-		Summary:     "Create an order",
-		Description: "Places a new order with one or more items.",
-		Tags:        []string{"orders"},
-	}, s.create)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "list-orders",
-		Method:      http.MethodGet,
-		Path:        "/orders",
-		Summary:     "List orders",
-		Description: "Returns a page of orders ordered by id. Use `limit` and `offset` query parameters to paginate; the response includes the total row count.",
-		Tags:        []string{"orders"},
-	}, s.list)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "get-order",
-		Method:      http.MethodGet,
-		Path:        "/orders/{id}",
-		Summary:     "Get an order",
-		Description: "Returns a single order by id, including all its items.",
-		Tags:        []string{"orders"},
-	}, s.get)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "update-order",
-		Method:      http.MethodPut,
-		Path:        "/orders/{id}",
-		Summary:     "Update an order",
-		Description: "Replaces an existing order and its items. Returns 404 if the order does not exist.",
-		Tags:        []string{"orders"},
-	}, s.update)
-
-	huma.Register(api, huma.Operation{
-		OperationID: "delete-order",
-		Method:      http.MethodDelete,
-		Path:        "/orders/{id}",
-		Summary:     "Delete an order",
-		Description: "Removes an order and its items. Returns 404 if the order does not exist.",
-		Tags:        []string{"orders"},
-	}, s.delete)
+func (s *Service) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("POST /orders", s.create)
+	mux.HandleFunc("GET /orders", s.list)
+	mux.HandleFunc("GET /orders/{id}", s.get)
+	mux.HandleFunc("PUT /orders/{id}", s.update)
+	mux.HandleFunc("DELETE /orders/{id}", s.delete)
 }
 
-func (s *Service) create(ctx context.Context, in *CreateOrderInput) (*CreateOrderOutput, error) {
-	b := in.Body
-	res, err := s.db.Execute(ctx, `
+func (s *Service) create(w http.ResponseWriter, r *http.Request) {
+	var input OrderInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validateOrderInput(input); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	res, err := s.db.Execute(r.Context(), `
 		INSERT INTO orders (user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, b.UserName, b.Email, b.Phone, b.Street, b.TownOrCity, b.State, b.Pincode, b.Notes, b.DeliveryRegion, b.DeliveryLocation, b.Total)
+	`, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total)
 	if err != nil {
 		log.Printf("insert order: %v", err)
-		return nil, huma.Error500InternalServerError("failed to create order")
+		writeError(w, http.StatusInternalServerError, "failed to create order")
+		return
 	}
 	orderID := int(res.LastInsertID)
 
-	items := make([]OrderItem, 0, len(b.Items))
-	for i, item := range b.Items {
-		itemRes, err := s.db.Execute(ctx, `
+	items := make([]OrderItem, 0, len(input.Items))
+	for i, item := range input.Items {
+		itemRes, err := s.db.Execute(r.Context(), `
 			INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
 			VALUES (?, ?, ?, ?, ?, ?)
 		`, orderID, item.ProductID, item.ProductName, item.Price, item.Quantity, item.Total)
 		if err != nil {
 			log.Printf("insert order item: %v", err)
-			return nil, huma.Error500InternalServerError("failed to create order item")
+			writeError(w, http.StatusInternalServerError, "failed to create order item")
+			return
 		}
 		items = append(items, OrderItem{
 			ID:              int(itemRes.LastInsertID),
-			OrderItemFields: b.Items[i],
+			OrderItemFields: input.Items[i],
 		})
 	}
 
-	return &CreateOrderOutput{Body: Order{ID: orderID, OrderFields: b.OrderFields, Items: items}}, nil
+	writeJSON(w, http.StatusCreated, Order{ID: orderID, OrderFields: input.OrderFields, Items: items})
 }
 
-func (s *Service) list(ctx context.Context, in *ListOrdersInput) (*ListOrdersOutput, error) {
-	countRows, err := s.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders`)
+func (s *Service) list(w http.ResponseWriter, r *http.Request) {
+	q := r.URL.Query()
+	limit, _ := strconv.Atoi(q.Get("limit"))
+	offset, _ := strconv.Atoi(q.Get("offset"))
+
+	countRows, err := s.db.Query(r.Context(), `SELECT COUNT(*) AS total FROM orders`)
 	if err != nil {
 		log.Printf("count orders: %v", err)
-		return nil, huma.Error500InternalServerError("failed to list orders")
+		writeError(w, http.StatusInternalServerError, "failed to list orders")
+		return
 	}
 	total := 0
 	if len(countRows) > 0 {
@@ -194,60 +136,70 @@ func (s *Service) list(ctx context.Context, in *ListOrdersInput) (*ListOrdersOut
 		FROM orders
 		ORDER BY id
 	`
-	queryArgs := []any{}
-	if in.Limit > 0 {
+	var queryArgs []any
+	if limit > 0 {
 		query += " LIMIT ? OFFSET ?"
-		queryArgs = append(queryArgs, in.Limit, in.Offset)
+		queryArgs = append(queryArgs, limit, offset)
 	}
 
-	rows, err := s.db.Query(ctx, query, queryArgs...)
+	rows, err := s.db.Query(r.Context(), query, queryArgs...)
 	if err != nil {
 		log.Printf("list orders: %v", err)
-		return nil, huma.Error500InternalServerError("failed to list orders")
+		writeError(w, http.StatusInternalServerError, "failed to list orders")
+		return
 	}
 
 	var limitPtr, offsetPtr *int
-	if in.Limit > 0 {
-		limitPtr = &in.Limit
-		offsetPtr = &in.Offset
+	if limit > 0 {
+		limitPtr = &limit
+		offsetPtr = &offset
 	}
 
 	items := make([]Order, 0, len(rows))
 	for _, row := range rows {
 		items = append(items, rowToOrder(row))
 	}
-	return &ListOrdersOutput{Body: ListOrdersResponse{
+	writeJSON(w, http.StatusOK, ListOrdersResponse{
 		Items:  items,
 		Total:  total,
 		Limit:  limitPtr,
 		Offset: offsetPtr,
-	}}, nil
+	})
 }
 
-func (s *Service) get(ctx context.Context, in *GetOrderInput) (*GetOrderOutput, error) {
-	rows, err := s.db.Query(ctx, `
+func (s *Service) get(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+
+	rows, err := s.db.Query(r.Context(), `
 		SELECT id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total
 		FROM orders WHERE id = ?
-	`, in.ID)
+	`, id)
 	if err != nil {
-		log.Printf("get order %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to get order")
+		log.Printf("get order %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to get order")
+		return
 	}
 
 	if len(rows) == 0 {
-		return nil, huma.Error404NotFound("order not found")
+		writeError(w, http.StatusNotFound, "order not found")
+		return
 	}
 
 	order := rowToOrder(rows[0])
 
-	itemRows, err := s.db.Query(ctx, `
+	itemRows, err := s.db.Query(r.Context(), `
 		SELECT id, product_id, product_name, price, quantity, total
 		FROM order_items WHERE order_id = ?
 		ORDER BY id
-	`, in.ID)
+	`, id)
 	if err != nil {
-		log.Printf("get order items %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to get order items")
+		log.Printf("get order items %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to get order items")
+		return
 	}
 
 	order.Items = make([]OrderItem, 0, len(itemRows))
@@ -255,66 +207,94 @@ func (s *Service) get(ctx context.Context, in *GetOrderInput) (*GetOrderOutput, 
 		order.Items = append(order.Items, rowToOrderItem(row))
 	}
 
-	return &GetOrderOutput{Body: order}, nil
+	writeJSON(w, http.StatusOK, order)
 }
 
-func (s *Service) update(ctx context.Context, in *UpdateOrderInput) (*UpdateOrderOutput, error) {
-	b := in.Body
-	res, err := s.db.Execute(ctx, `
+func (s *Service) update(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
+	if err != nil {
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
+	}
+
+	var input OrderInput
+	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+		writeError(w, http.StatusBadRequest, "invalid request body")
+		return
+	}
+	if err := validateOrderInput(input); err != nil {
+		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
+	res, err := s.db.Execute(r.Context(), `
 		UPDATE orders
 		SET user_name = ?, email = ?, phone = ?, street = ?, town_or_city = ?, state = ?, pincode = ?, notes = ?, delivery_region = ?, delivery_location = ?, total = ?
 		WHERE id = ?
-	`, b.UserName, b.Email, b.Phone, b.Street, b.TownOrCity, b.State, b.Pincode, b.Notes, b.DeliveryRegion, b.DeliveryLocation, b.Total, in.ID)
+	`, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, id)
 	if err != nil {
-		log.Printf("update order %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to update order")
+		log.Printf("update order %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to update order")
+		return
 	}
 
 	if res.RowsAffected == 0 {
-		return nil, huma.Error404NotFound("order not found")
+		writeError(w, http.StatusNotFound, "order not found")
+		return
 	}
 
-	_, err = s.db.Execute(ctx, `DELETE FROM order_items WHERE order_id = ?`, in.ID)
+	_, err = s.db.Execute(r.Context(), `DELETE FROM order_items WHERE order_id = ?`, id)
 	if err != nil {
-		log.Printf("delete order items %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to update order items")
+		log.Printf("delete order items %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to update order items")
+		return
 	}
 
-	items := make([]OrderItem, 0, len(b.Items))
-	for i, item := range b.Items {
-		itemRes, err := s.db.Execute(ctx, `
+	items := make([]OrderItem, 0, len(input.Items))
+	for i, item := range input.Items {
+		itemRes, err := s.db.Execute(r.Context(), `
 			INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
 			VALUES (?, ?, ?, ?, ?, ?)
-		`, in.ID, item.ProductID, item.ProductName, item.Price, item.Quantity, item.Total)
+		`, id, item.ProductID, item.ProductName, item.Price, item.Quantity, item.Total)
 		if err != nil {
 			log.Printf("insert order item: %v", err)
-			return nil, huma.Error500InternalServerError("failed to update order items")
+			writeError(w, http.StatusInternalServerError, "failed to update order items")
+			return
 		}
 		items = append(items, OrderItem{
 			ID:              int(itemRes.LastInsertID),
-			OrderItemFields: b.Items[i],
+			OrderItemFields: input.Items[i],
 		})
 	}
 
-	return &UpdateOrderOutput{Body: Order{ID: in.ID, OrderFields: b.OrderFields, Items: items}}, nil
+	writeJSON(w, http.StatusOK, Order{ID: id, OrderFields: input.OrderFields, Items: items})
 }
 
-func (s *Service) delete(ctx context.Context, in *DeleteOrderInput) (*struct{}, error) {
-	_, err := s.db.Execute(ctx, `DELETE FROM order_items WHERE order_id = ?`, in.ID)
+func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
+	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		log.Printf("delete order items %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to delete order")
+		writeError(w, http.StatusBadRequest, "invalid order id")
+		return
 	}
 
-	res, err := s.db.Execute(ctx, `DELETE FROM orders WHERE id = ?`, in.ID)
+	_, err = s.db.Execute(r.Context(), `DELETE FROM order_items WHERE order_id = ?`, id)
 	if err != nil {
-		log.Printf("delete order %d: %v", in.ID, err)
-		return nil, huma.Error500InternalServerError("failed to delete order")
+		log.Printf("delete order items %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to delete order")
+		return
+	}
+
+	res, err := s.db.Execute(r.Context(), `DELETE FROM orders WHERE id = ?`, id)
+	if err != nil {
+		log.Printf("delete order %d: %v", id, err)
+		writeError(w, http.StatusInternalServerError, "failed to delete order")
+		return
 	}
 	if res.RowsAffected == 0 {
-		return nil, huma.Error404NotFound("order not found")
+		writeError(w, http.StatusNotFound, "order not found")
+		return
 	}
-	return nil, nil
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func rowToOrder(row database.Row) Order {
@@ -365,4 +345,48 @@ func rowToOrderItem(row database.Row) OrderItem {
 			Total:       total,
 		},
 	}
+}
+
+func writeJSON(w http.ResponseWriter, status int, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	json.NewEncoder(w).Encode(v)
+}
+
+func writeError(w http.ResponseWriter, status int, msg string) {
+	writeJSON(w, status, map[string]string{"error": msg})
+}
+
+func validateOrderInput(o OrderInput) error {
+	if o.UserName == "" {
+		return fmt.Errorf("userName is required")
+	}
+	if o.Email == "" {
+		return fmt.Errorf("email is required")
+	}
+	if o.Phone == "" {
+		return fmt.Errorf("phone is required")
+	}
+	if o.Street == "" {
+		return fmt.Errorf("street is required")
+	}
+	if o.TownOrCity == "" {
+		return fmt.Errorf("townOrCity is required")
+	}
+	if o.State == "" {
+		return fmt.Errorf("state is required")
+	}
+	if o.Pincode == "" {
+		return fmt.Errorf("pincode is required")
+	}
+	if o.DeliveryRegion == "" {
+		return fmt.Errorf("deliveryRegion is required")
+	}
+	if o.DeliveryLocation == "" {
+		return fmt.Errorf("deliveryLocation is required")
+	}
+	if len(o.Items) == 0 {
+		return fmt.Errorf("at least one item is required")
+	}
+	return nil
 }
