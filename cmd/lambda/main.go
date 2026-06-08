@@ -20,11 +20,7 @@ func main() {
 		log.Fatalf("config: %v", err)
 	}
 
-	db, err := database.New(database.Config{
-		Mode:  cfg.Backend,
-		D1:    cfg.D1,
-		Local: cfg.Local,
-	})
+	db, err := database.New(cfg.Database)
 	if err != nil {
 		log.Fatalf("database: %v", err)
 	}

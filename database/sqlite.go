@@ -15,14 +15,14 @@ type sqliteDB struct {
 	db *sql.DB
 }
 
-func newSQLite(cfg Config) (DB, error) {
-	if dir := filepath.Dir(cfg.LocalPath); dir != "" && dir != "." {
+func newSQLite(cfg *LocalConfig) (DB, error) {
+	if dir := filepath.Dir(cfg.Path); dir != "" && dir != "." {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
 			return nil, fmt.Errorf("creating db dir: %w", err)
 		}
 	}
 
-	db, err := sql.Open("sqlite", cfg.LocalPath+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
+	db, err := sql.Open("sqlite", cfg.Path+"?_pragma=journal_mode(WAL)&_pragma=foreign_keys(1)")
 	if err != nil {
 		return nil, fmt.Errorf("opening sqlite: %w", err)
 	}

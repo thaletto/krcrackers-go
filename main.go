@@ -33,11 +33,7 @@ func bootstrap() (database.DB, *config.Config, error) {
 	if err != nil {
 		return nil, nil, fmt.Errorf("config: %w", err)
 	}
-	db, err := database.New(database.Config{
-		Mode:  cfg.Backend,
-		D1:    cfg.D1,
-		Local: cfg.Local,
-	})
+	db, err := database.New(cfg.Database)
 	if err != nil {
 		return nil, nil, fmt.Errorf("database: %w", err)
 	}
@@ -97,7 +93,7 @@ func runServer() {
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 
-	log.Printf("starting server in %s mode on :%s", cfg.Backend, cfg.Port)
+	log.Printf("starting server in %s mode on :%s", cfg.Database.Mode, cfg.Port)
 	go func() {
 		if err := srv.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			log.Fatalf("server: %v", err)

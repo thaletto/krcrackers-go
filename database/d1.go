@@ -18,7 +18,7 @@ type d1Client struct {
 	databaseID string
 }
 
-func newD1(cfg Config) (DB, error) {
+func newD1(cfg *D1Config) (DB, error) {
 	return &d1Client{
 		inner:      cloudflare.NewClient(option.WithAPIToken(cfg.APIToken)),
 		accountID:  cfg.AccountID,
