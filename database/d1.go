@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 
 	"github.com/cloudflare/cloudflare-go/v7"
 	"github.com/cloudflare/cloudflare-go/v7/d1"
@@ -69,6 +70,93 @@ func (c *d1Client) Execute(ctx context.Context, sql string, params ...any) (Resu
 
 func (c *d1Client) Close() error {
 	return nil
+}
+
+func (c *d1Client) Begin(_ context.Context) (Tx, error) {
+	return &d1Tx{client: c}, nil
+}
+
+// d1Tx is a best-effort transaction adapter for D1's HTTP API.
+// Statements are buffered on Execute and executed sequentially on Commit.
+// If any statement fails during Commit, cleanup is attempted for statements
+// that already succeeded (DELETE for INSERTs). This is not truly atomic —
+// a crash between successful statements leaves partial state.
+type d1Tx struct {
+	client    *d1Client
+	stmts     []d1TxStmt
+	ids       []int64 // lastInsertID per statement, for cleanup
+}
+
+type d1TxStmt struct {
+	sql    string
+	params []any
+}
+
+func (t *d1Tx) Query(ctx context.Context, sql string, params ...any) ([]Row, error) {
+	return t.client.Query(ctx, sql, params...)
+}
+
+func (t *d1Tx) Execute(_ context.Context, sql string, params ...any) (Result, error) {
+	t.stmts = append(t.stmts, d1TxStmt{sql: sql, params: params})
+	return Result{}, nil
+}
+
+func (t *d1Tx) Commit() error {
+	if len(t.stmts) == 0 {
+		return nil
+	}
+	for i, stmt := range t.stmts {
+		res, err := t.client.Execute(context.Background(), stmt.sql, stmt.params...)
+		if err != nil {
+			t.cleanup(i)
+			return fmt.Errorf("d1 tx commit: %w", err)
+		}
+		t.ids = append(t.ids, res.LastInsertID)
+	}
+	return nil
+}
+
+// cleanup attempts to undo INSERTs that already succeeded by deleting rows
+// by their last-inserted IDs. Best-effort: if cleanup itself fails, we
+// return and leave partial state.
+func (t *d1Tx) cleanup(failedAt int) {
+	for i := failedAt - 1; i >= 0; i-- {
+		stmt := t.stmts[i]
+		if isInsertStmt(stmt.sql) && i < len(t.ids) && t.ids[i] > 0 {
+			table := extractTableName(stmt.sql)
+			if table != "" {
+				_, _ = t.client.Execute(context.Background(),
+					"DELETE FROM "+table+" WHERE id = ?", t.ids[i])
+			}
+		}
+	}
+}
+
+func (t *d1Tx) Rollback() error {
+	t.stmts = nil
+	t.ids = nil
+	return nil
+}
+
+func isInsertStmt(sql string) bool {
+	trimmed := strings.TrimSpace(strings.ToLower(sql))
+	return strings.HasPrefix(trimmed, "insert")
+}
+
+func extractTableName(sql string) string {
+	lower := strings.ToLower(sql)
+	for _, prefix := range []string{"insert into ", "update ", "delete from "} {
+		idx := strings.Index(lower, prefix)
+		if idx >= 0 {
+			start := idx + len(prefix)
+			end := start
+			for end < len(sql) && sql[end] != ' ' && sql[end] != '(' && sql[end] != '\n' {
+				end++
+			}
+			return sql[start:end]
+		}
+	}
+	return ""
 }
 
 func (c *d1Client) run(ctx context.Context, sql string, params []any) (*pagination.SinglePage[d1.QueryResult], error) {

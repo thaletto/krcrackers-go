@@ -3,15 +3,14 @@ package products
 import (
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
 	"strconv"
 
-	"github.com/thaletto/krcrackers-go/database"
+	"github.com/thaletto/krcrackers-go/serverutil"
 )
 
 type Service struct {
-	db database.DB
+	repo Repository
 }
 
 type ProductFields struct {
@@ -40,8 +39,8 @@ type ListProductsResponse struct {
 	Offset *int      `json:"offset,omitempty"`
 }
 
-func NewService(db database.DB) *Service {
-	return &Service{db: db}
+func NewService(repo Repository) *Service {
+	return &Service{repo: repo}
 }
 
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
@@ -55,25 +54,21 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 	var input ProductInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		serverutil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := validateProductInput(input); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		serverutil.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
-	res, err := s.db.Execute(r.Context(), `
-		INSERT INTO products (name, price, brand, description, category, image, compare_price)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice)
+	product, err := s.repo.Create(r.Context(), input)
 	if err != nil {
-		log.Printf("insert product: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to create product")
+		serverutil.WriteError(w, http.StatusInternalServerError, "failed to create product")
 		return
 	}
 
-	writeJSON(w, http.StatusCreated, productFromInput(int(res.LastInsertID), input))
+	serverutil.WriteJSON(w, http.StatusCreated, product)
 }
 
 func (s *Service) list(w http.ResponseWriter, r *http.Request) {
@@ -81,171 +76,82 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
 
-	countRows, err := s.db.Query(r.Context(), `SELECT COUNT(*) AS total FROM products`)
+	resp, err := s.repo.List(r.Context(), limit, offset)
 	if err != nil {
-		log.Printf("count products: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to list products")
-		return
-	}
-	total := 0
-	if len(countRows) > 0 {
-		if v, err := countRows[0].Int("total"); err == nil {
-			total = int(v)
-		}
-	}
-
-	query := `
-		SELECT id, name, price, brand, description, category, image, compare_price
-		FROM products
-		ORDER BY id
-	`
-	var queryArgs []any
-	if limit > 0 {
-		query += " LIMIT ? OFFSET ?"
-		queryArgs = append(queryArgs, limit, offset)
-	}
-
-	rows, err := s.db.Query(r.Context(), query, queryArgs...)
-	if err != nil {
-		log.Printf("list products: %v", err)
-		writeError(w, http.StatusInternalServerError, "failed to list products")
+		serverutil.WriteError(w, http.StatusInternalServerError, "failed to list products")
 		return
 	}
 
-	var limitPtr, offsetPtr *int
-	if limit > 0 {
-		limitPtr = &limit
-		offsetPtr = &offset
-	}
-
-	items := make([]Product, 0, len(rows))
-	for _, row := range rows {
-		items = append(items, rowToProduct(row))
-	}
-	writeJSON(w, http.StatusOK, ListProductsResponse{
-		Items:  items,
-		Total:  total,
-		Limit:  limitPtr,
-		Offset: offsetPtr,
-	})
+	serverutil.WriteJSON(w, http.StatusOK, resp)
 }
 
 func (s *Service) get(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid product id")
+		serverutil.WriteError(w, http.StatusBadRequest, "invalid product id")
 		return
 	}
 
-	rows, err := s.db.Query(r.Context(), `
-		SELECT id, name, price, brand, description, category, image, compare_price
-		FROM products WHERE id = ?
-	`, id)
+	product, err := s.repo.Get(r.Context(), id)
 	if err != nil {
-		log.Printf("get product %d: %v", id, err)
-		writeError(w, http.StatusInternalServerError, "failed to get product")
+		if err.Error() == "product not found" {
+			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		serverutil.WriteError(w, http.StatusInternalServerError, "failed to get product")
 		return
 	}
 
-	if len(rows) == 0 {
-		writeError(w, http.StatusNotFound, "product not found")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, rowToProduct(rows[0]))
+	serverutil.WriteJSON(w, http.StatusOK, product)
 }
 
 func (s *Service) update(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid product id")
+		serverutil.WriteError(w, http.StatusBadRequest, "invalid product id")
 		return
 	}
 
 	var input ProductInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
-		writeError(w, http.StatusBadRequest, "invalid request body")
+		serverutil.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 	if err := validateProductInput(input); err != nil {
-		writeError(w, http.StatusUnprocessableEntity, err.Error())
+		serverutil.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return
 	}
 
-	res, err := s.db.Execute(r.Context(), `
-		UPDATE products
-		SET name = ?, price = ?, brand = ?, description = ?, category = ?, image = ?, compare_price = ?
-		WHERE id = ?
-	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice, id)
+	product, err := s.repo.Update(r.Context(), id, input)
 	if err != nil {
-		log.Printf("update product %d: %v", id, err)
-		writeError(w, http.StatusInternalServerError, "failed to update product")
+		if err.Error() == "product not found" {
+			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		serverutil.WriteError(w, http.StatusInternalServerError, "failed to update product")
 		return
 	}
 
-	if res.RowsAffected == 0 {
-		writeError(w, http.StatusNotFound, "product not found")
-		return
-	}
-
-	writeJSON(w, http.StatusOK, productFromInput(id, input))
+	serverutil.WriteJSON(w, http.StatusOK, product)
 }
 
 func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
-		writeError(w, http.StatusBadRequest, "invalid product id")
+		serverutil.WriteError(w, http.StatusBadRequest, "invalid product id")
 		return
 	}
 
-	res, err := s.db.Execute(r.Context(), `DELETE FROM products WHERE id = ?`, id)
-	if err != nil {
-		log.Printf("delete product %d: %v", id, err)
-		writeError(w, http.StatusInternalServerError, "failed to delete product")
+	if err := s.repo.Delete(r.Context(), id); err != nil {
+		if err.Error() == "product not found" {
+			serverutil.WriteError(w, http.StatusNotFound, err.Error())
+			return
+		}
+		serverutil.WriteError(w, http.StatusInternalServerError, "failed to delete product")
 		return
 	}
-	if res.RowsAffected == 0 {
-		writeError(w, http.StatusNotFound, "product not found")
-		return
-	}
+
 	w.WriteHeader(http.StatusNoContent)
-}
-
-func productFromInput(id int, b ProductInput) Product {
-	return Product{ID: id, ProductFields: b.ProductFields}
-}
-
-func rowToProduct(row database.Row) Product {
-	id, _ := row.Int("id")
-	name, _ := row.String("name")
-	price, _ := row.Float("price")
-	brand, _ := row.NullableString("brand")
-	description, _ := row.NullableString("description")
-	category, _ := row.String("category")
-	image, _ := row.NullableString("image")
-	comparePrice, _ := row.Float("compare_price")
-	return Product{
-		ID: int(id),
-		ProductFields: ProductFields{
-			Name:         name,
-			Price:        price,
-			Brand:        brand,
-			Description:  description,
-			Category:     category,
-			Image:        image,
-			ComparePrice: comparePrice,
-		},
-	}
-}
-
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	json.NewEncoder(w).Encode(v)
-}
-
-func writeError(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
 }
 
 func validateProductInput(p ProductInput) error {

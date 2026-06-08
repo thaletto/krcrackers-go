@@ -26,9 +26,11 @@ When the client omits `limit`, `limit` and `offset` are omitted from the respons
 
 ## Database seam
 
-All data access goes through the `database.DB` interface (`Query`, `Execute`, `Close`). Rows are **not** `*sql.Row` - use the typed `Row` interface: `row.Int("col")`, `row.String("col")`, `row.Float("col")`, `row.NullableString("col")`. Both backends (SQLite, D1) implement this.
+All data access goes through the `database.DB` interface (`Query`, `Execute`, `Begin`, `Close`). Rows are **not** `*sql.Row` - use the typed `Row` interface: `row.Int("col")`, `row.String("col")`, `row.Float("col")`, `row.NullableString("col")`. Both backends (SQLite, D1) implement this.
 
-Adding a backend = one new file implementing `DB` + `Row` + a case in `database.New`.
+Transactions use `database.Tx` (`Query`, `Execute`, `Commit`, `Rollback`). SQLite wraps `*sql.Tx` (real atomicity). D1 buffers statements and executes on commit (best-effort; not truly atomic).
+
+Adding a backend = one new file implementing `DB` + `Tx` + `Row` + a case in `database.New`.
 
 ## Dual backend: local SQLite vs Cloudflare D1
 
@@ -41,12 +43,28 @@ Same `database.DB` interface for both. `database.New` switches on `Mode`:
 
 ## Service pattern
 
-Each service follows this shape:
+Each service has two layers:
+
+**Repository** — owns SQL, row mapping, and transactions:
 
 ```go
-type Service struct { db database.DB }
+type Repository interface {
+    Create(ctx context.Context, input ProductInput) (Product, error)
+    List(ctx context.Context, limit, offset int) (ListProductsResponse, error)
+    Get(ctx context.Context, id int) (Product, error)
+    Update(ctx context.Context, id int, input ProductInput) (Product, error)
+    Delete(ctx context.Context, id int) error
+}
 
-func NewService(db database.DB) *Service { ... }
+func NewRepository(db database.DB) Repository { ... }
+```
+
+**Service (handlers)** — thin HTTP adapters, delegate to repository:
+
+```go
+type Service struct { repo Repository }
+
+func NewService(repo Repository) *Service { ... }
 
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
     mux.HandleFunc("POST /path", s.handler)
@@ -56,6 +74,8 @@ func (s *Service) handler(w http.ResponseWriter, r *http.Request) { ... }
 ```
 
 Register services in `server/handler.go` via `svc.RegisterRoutes(mux)`.
+
+Shared HTTP helpers (`WriteJSON`, `WriteError`) live in `serverutil/respond.go` to avoid import cycles.
 
 ## Migrations
 

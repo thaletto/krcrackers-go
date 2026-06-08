@@ -36,7 +36,18 @@ func (e *TypeError) Error() string {
 type DB interface {
 	Query(ctx context.Context, sql string, params ...any) ([]Row, error)
 	Execute(ctx context.Context, sql string, params ...any) (Result, error)
+	Begin(ctx context.Context) (Tx, error)
 	Close() error
+}
+
+// Tx is a database transaction. Call Commit to persist, Rollback to discard.
+// SQLite adapters wrap *sql.Tx for real atomicity. D1 adapters buffer
+// statements and execute them on Commit (best-effort; not truly atomic).
+type Tx interface {
+	Query(ctx context.Context, sql string, params ...any) ([]Row, error)
+	Execute(ctx context.Context, sql string, params ...any) (Result, error)
+	Commit() error
+	Rollback() error
 }
 
 type Mode string
