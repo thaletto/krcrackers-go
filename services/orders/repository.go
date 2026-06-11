@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	apperrors "github.com/thaletto/krcrackers-go/errors"
 	"github.com/thaletto/krcrackers-go/database"
 )
 
@@ -121,7 +122,7 @@ func (r *repo) Get(ctx context.Context, id int) (Order, error) {
 		return Order{}, fmt.Errorf("get order %d: %w", id, err)
 	}
 	if len(rows) == 0 {
-		return Order{}, fmt.Errorf("order not found")
+		return Order{}, fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
 	}
 
 	order, err := rowToOrder(rows[0])
@@ -167,7 +168,7 @@ func (r *repo) Update(ctx context.Context, id int, input OrderInput) (Order, err
 	}
 	if res.RowsAffected == 0 {
 		_ = tx.Rollback()
-		return Order{}, fmt.Errorf("order not found")
+		return Order{}, fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
 	}
 
 	_, err = tx.Execute(ctx, `DELETE FROM order_items WHERE order_id = ?`, id)
@@ -218,7 +219,7 @@ func (r *repo) Delete(ctx context.Context, id int) error {
 	}
 	if res.RowsAffected == 0 {
 		_ = tx.Rollback()
-		return fmt.Errorf("order not found")
+		return fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
 	}
 
 	return tx.Commit()

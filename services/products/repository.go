@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 
+	apperrors "github.com/thaletto/krcrackers-go/errors"
 	"github.com/thaletto/krcrackers-go/database"
 )
 
@@ -93,7 +94,7 @@ func (r *repo) Get(ctx context.Context, id int) (Product, error) {
 		return Product{}, fmt.Errorf("get product %d: %w", id, err)
 	}
 	if len(rows) == 0 {
-		return Product{}, fmt.Errorf("product not found")
+		return Product{}, fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
 	}
 	return rowToProduct(rows[0])
 }
@@ -108,7 +109,7 @@ func (r *repo) Update(ctx context.Context, id int, input ProductInput) (Product,
 		return Product{}, fmt.Errorf("update product %d: %w", id, err)
 	}
 	if res.RowsAffected == 0 {
-		return Product{}, fmt.Errorf("product not found")
+		return Product{}, fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
 	}
 	return productFromInput(id, input), nil
 }
@@ -119,7 +120,7 @@ func (r *repo) Delete(ctx context.Context, id int) error {
 		return fmt.Errorf("delete product %d: %w", id, err)
 	}
 	if res.RowsAffected == 0 {
-		return fmt.Errorf("product not found")
+		return fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
 	}
 	return nil
 }

@@ -2,10 +2,12 @@ package orders
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"strconv"
 
+	apperrors "github.com/thaletto/krcrackers-go/errors"
 	"github.com/thaletto/krcrackers-go/server"
 )
 
@@ -113,7 +115,7 @@ func (s *Service) get(w http.ResponseWriter, r *http.Request) {
 
 	order, err := s.repo.Get(r.Context(), id)
 	if err != nil {
-		if err.Error() == "order not found" {
+		if errors.Is(err, apperrors.ErrNotFound) {
 			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
@@ -143,7 +145,7 @@ func (s *Service) update(w http.ResponseWriter, r *http.Request) {
 
 	order, err := s.repo.Update(r.Context(), id, input)
 	if err != nil {
-		if err.Error() == "order not found" {
+		if errors.Is(err, apperrors.ErrNotFound) {
 			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
@@ -162,7 +164,7 @@ func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if err := s.repo.Delete(r.Context(), id); err != nil {
-		if err.Error() == "order not found" {
+		if errors.Is(err, apperrors.ErrNotFound) {
 			server.WriteError(w, http.StatusNotFound, err.Error())
 			return
 		}
