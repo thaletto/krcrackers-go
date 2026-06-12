@@ -10,15 +10,38 @@ import (
 )
 
 type Config struct {
-	Database database.Config
-	Port     string
+	Database     database.Config
+	Port         string
+	Meilisearch  MeilisearchConfig
+	R2           R2Config
+	JWT          JWTConfig
+	WhatsApp     WhatsAppConfig
+	IsProduction bool
 }
 
-// Load reads config from the environment, with .env for shared defaults
-// and .env.local for personal overrides (gitignored).
-//
-// APP_ENV defaults to "development" unless CLOUDFLARE_API_TOKEN is set,
-// in which case it defaults to "production".
+type MeilisearchConfig struct {
+	URL    string
+	APIKey string
+}
+
+type R2Config struct {
+	AccountID     string
+	AccessKeyID   string
+	SecretKey     string
+	BucketName    string
+	PublicURLBase string
+}
+
+type JWTConfig struct {
+	Secret string
+}
+
+type WhatsAppConfig struct {
+	APIToken     string
+	PhoneNumberID string
+	FromNumber   string
+}
+
 func Load() (*Config, error) {
 	if err := godotenv.Load(".env"); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("loading .env: %w", err)
@@ -37,7 +60,27 @@ func Load() (*Config, error) {
 	}
 
 	cfg := &Config{
-		Port: getEnv("PORT", "8080"),
+		Port:         getEnv("PORT", "8080"),
+		IsProduction: appEnv == "production",
+		Meilisearch: MeilisearchConfig{
+			URL:    os.Getenv("MEILISEARCH_URL"),
+			APIKey: os.Getenv("MEILISEARCH_API_KEY"),
+		},
+		R2: R2Config{
+			AccountID:     os.Getenv("R2_ACCOUNT_ID"),
+			AccessKeyID:   os.Getenv("R2_ACCESS_KEY_ID"),
+			SecretKey:     os.Getenv("R2_SECRET_ACCESS_KEY"),
+			BucketName:    os.Getenv("R2_BUCKET_NAME"),
+			PublicURLBase: os.Getenv("R2_PUBLIC_URL_BASE"),
+		},
+		JWT: JWTConfig{
+			Secret: os.Getenv("JWT_SECRET"),
+		},
+		WhatsApp: WhatsAppConfig{
+			APIToken:      os.Getenv("WHATSAPP_API_TOKEN"),
+			PhoneNumberID: os.Getenv("WHATSAPP_PHONE_NUMBER_ID"),
+			FromNumber:    os.Getenv("WHATSAPP_FROM_NUMBER"),
+		},
 	}
 
 	switch appEnv {
