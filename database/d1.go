@@ -174,8 +174,26 @@ func paramsToStrings(params []any) []string {
 			out[i] = ""
 		case string:
 			out[i] = v
+		case *string:
+			if v != nil {
+				out[i] = *v
+			} else {
+				out[i] = ""
+			}
 		case []byte:
 			out[i] = string(v)
+		case int:
+			out[i] = fmt.Sprint(v)
+		case int64:
+			out[i] = fmt.Sprint(v)
+		case float64:
+			out[i] = fmt.Sprint(v)
+		case bool:
+			if v {
+				out[i] = "1"
+			} else {
+				out[i] = "0"
+			}
 		default:
 			out[i] = fmt.Sprint(v)
 		}

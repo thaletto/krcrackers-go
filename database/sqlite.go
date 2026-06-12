@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	_ "modernc.org/sqlite"
 )
@@ -182,6 +183,8 @@ func runtimeType(v any) string {
 		return "REAL"
 	case string, []byte:
 		return "TEXT"
+	case time.Time:
+		return "DATETIME"
 	}
 	return ""
 }
@@ -225,6 +228,9 @@ func (r *sqliteRow) String(name string) (string, error) {
 	if b, ok := v.([]byte); ok {
 		return string(b), nil
 	}
+	if tm, ok := v.(time.Time); ok {
+		return tm.Format(time.DateTime), nil
+	}
 	return "", &TypeError{Column: name, Source: fmt.Sprintf("%T", v), Want: "text"}
 }
 
@@ -251,7 +257,7 @@ func (r *sqliteRow) NullableString(name string) (*string, error) {
 
 func isIntegerType(t string) bool {
 	switch t {
-	case "INTEGER", "INT", "INT2", "INT8", "TINYINT", "SMALLINT", "BIGINT", "MEDIUMINT":
+	case "INTEGER", "INT", "INT2", "INT8", "TINYINT", "SMALLINT", "BIGINT", "MEDIUMINT", "BOOLEAN":
 		return true
 	}
 	return false
@@ -267,7 +273,7 @@ func isFloatType(t string) bool {
 
 func isStringType(t string) bool {
 	switch t {
-	case "TEXT", "VARCHAR", "CHAR", "CLOB", "STRING":
+	case "TEXT", "VARCHAR", "CHAR", "CLOB", "STRING", "DATETIME", "DATE", "TIME", "TIMESTAMP":
 		return true
 	}
 	return false
