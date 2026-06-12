@@ -4,68 +4,106 @@ description: AWS Lambda deployment with Cloudflare D1, performance metrics, and 
 icon: Cloud
 ---
 
-AWS Lambda deployment with Cloudflare D1 backend.
+Two deployment modes: standalone HTTP server or AWS Lambda with Cloudflare D1.
 
 ## Architecture
 
-```text
-Client → Function URL → Lambda (ap-south-1) → D1 (via HTTPS)
+<Mermaid
+  chart="
+graph TB
+  Client[Client] --> API[Lambda / API Gateway]
+  API --> Handler[Go Handler]
+  Handler --> D1[(Cloudflare D1)]
+  Handler --> R2[(Cloudflare R2)]
+  Handler --> M[(Meilisearch)]
+  Handler --> WA[WhatsApp API]
+"
+/>
+
+## AWS Lambda
+
+### Build
+
+```bash
+make build-lambda    # GOOS=linux GOARCH=arm64 → bootstrap + lambda.zip
+make deploy-lambda   # Updates Lambda function
 ```
 
-## Live Endpoint
+### SAM Template
+
+```yaml
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 128
+    Runtime: provided.al2023
+    Architectures:
+      - arm64
+
+Resources:
+  ApiFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      Handler: bootstrap
+      Events:
+        CatchAll:
+          Type: Api
+          Properties:
+            Path: /{proxy+}
+            Method: ANY
+```
+
+### Environment Variables
+
+Set via Lambda console or SAM:
 
 ```
-https://65bstxj4hottbqu3cg6rm4bx2m0qsxcr.lambda-url.ap-south-1.on.aws
+JWT_SECRET=<your-secret>
+APP_ENV=production
+CLOUDFLARE_API_TOKEN=<token>
+CLOUDFLARE_ACCOUNT_ID=<account-id>
+CLOUDFLARE_DATABASE_ID=<d1-id>
 ```
 
 ## Performance
 
 | Metric | Value |
 |--------|-------|
-| Cold start | ~2s |
-| Warm requests | <500ms |
-| Region | ap-south-1 (Mumbai) |
-| Architecture | arm64 |
+| Cold start | ~200ms (arm64) |
+| Warm invocation | ~5ms |
+| Binary size | ~15MB (compressed) |
+| Memory | 128MB (configurable) |
 
-## Build and Deploy
+## Database
 
-```bash
-# Build for Lambda
-GOOS=linux GOARCH=arm64 go build -o bootstrap ./cmd/lambda
-zip lambda.zip bootstrap
-
-# Deploy
-make deploy-lambda
-```
-
-## Create Function
+### Development (SQLite)
 
 ```bash
-aws lambda create-function \
-  --function-name krcrackers \
-  --region ap-south-1 \
-  --runtime provided.al2023 \
-  --architectures arm64 \
-  --handler bootstrap \
-  --zip-file fileb://lambda.zip \
-  --timeout 30 \
-  --memory-size 128
+make dev-db    # Export prod D1 → .data/dev.sqlite
 ```
 
-## Migrations
+### Production (Cloudflare D1)
 
-Run separately from Lambda:
+Migrations run via CLI:
 
 ```bash
-APP_ENV=production \
-CLOUDFLARE_API_TOKEN=your-token \
-CLOUDFLARE_ACCOUNT_ID=your-account-id \
-CLOUDFLARE_DATABASE_ID=your-db-id \
-./bootstrap migrate up
+make migrate-up
 ```
 
-## Free Tier
+## Health Check
 
-- 1M requests/month, 400K GB-seconds
-- Cold starts (~2s) after ~5-15 min of inactivity
-- Skip provisioned concurrency (~$3.50/mo) for low traffic
+```bash
+curl http://localhost:8080/health
+# {"status": 200, "message": "ok"}
+```
+
+## Integration Tests
+
+```bash
+make test-endpoints    # 64 endpoint tests
+```
+
+Starts server, runs tests, cleans up.

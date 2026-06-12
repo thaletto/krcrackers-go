@@ -4,37 +4,48 @@ description: In-memory pub/sub bus for cross-service communication.
 icon: Radio
 ---
 
-In-memory pub/sub bus decouples services for cross-cutting concerns. Publishers fire events, subscribers handle them asynchronously in goroutines using `context.Background()`.
+In-memory pub/sub decouples services for cross-cutting concerns. Publishers fire events, subscribers handle them asynchronously in goroutines.
 
 ## Event Flow
 
-```text
-Products Service ──publish──→ eventbus.Bus ──subscribe──→ Search Subscriber (Meilisearch sync)
-                                         ──subscribe──→ Notification Subscriber (WhatsApp)
-Orders Service ───publish──→ eventbus.Bus ──subscribe──→ Search Subscriber
-                                       ──subscribe──→ Notification Subscriber
-```
+<Mermaid
+  chart="
+flowchart LR
+  P[Products Service] -->|publish| EB[eventbus.Bus]
+  O[Orders Service] -->|publish| EB
+  EB -->|subscribe| S[Search Subscriber\nMeilisearch sync]
+  EB -->|subscribe| N[Notification Subscriber\nWhatsApp]
+"
+/>
 
 ## Event Types
 
 | Event | Publisher | Subscribers |
 |-------|-----------|-------------|
-| `product.created` | Products service | Search (index to Meilisearch) |
-| `product.updated` | Products service | Search (re-index) |
-| `product.deleted` | Products service | Search (remove from index) |
-| `order.placed` | Orders service | Notifications (WhatsApp) |
-| `order.confirmed` | Orders service | Notifications (WhatsApp) |
-| `order.shipped` | Orders service | Notifications (WhatsApp) |
-| `order.delivered` | Orders service | Notifications (WhatsApp) |
-| `order.cancelled` | Orders service | Notifications (WhatsApp) |
+| `product.created` | Products | Search (index to Meilisearch) |
+| `product.updated` | Products | Search (re-index) |
+| `product.deleted` | Products | Search (remove from index) |
+| `order.placed` | Orders | Notifications (WhatsApp) |
+| `order.confirmed` | Orders | Notifications (WhatsApp) |
+| `order.shipped` | Orders | Notifications (WhatsApp) |
+| `order.delivered` | Orders | Notifications (WhatsApp) |
+| `order.cancelled` | Orders | Notifications (WhatsApp) |
 
 ## Order Status State Machine
 
-```text
-pending ──→ confirmed ──→ shipped ──→ delivered
-  │            │            │
-  └──→ cancelled ←──→ cancelled ←──→ cancelled
-```
+<Mermaid
+  chart="
+stateDiagram-v2
+  pending --> confirmed: confirm
+  pending --> cancelled: cancel
+  confirmed --> shipped: ship
+  confirmed --> cancelled: cancel
+  shipped --> delivered: deliver
+  shipped --> cancelled: cancel
+  delivered : terminal
+  cancelled : terminal
+"
+/>
 
 Each transition publishes an event for notification delivery.
 
@@ -53,4 +64,39 @@ bus.Subscribe(events.ProductCreated, func(ctx context.Context, event eventbus.Ev
     // handle event
     return nil
 })
+```
+
+## Event Bus Implementation
+
+```go
+type Bus interface {
+    Publish(ctx context.Context, event Event)
+    Subscribe(name string, handler Handler)
+}
+```
+
+- Each handler runs in a **separate goroutine** with `context.Background()`
+- Handlers execute concurrently  no ordering guarantees
+- In-memory only  events are lost on process restart
+- No retry mechanism  handlers should be idempotent
+
+## Payload Types
+
+```go
+type ProductEvent struct {
+    ID          int
+    Name        string
+    Description string
+    Price       float64
+    Brand       string
+    Category    string
+    Image       string
+    ComparePrice float64
+}
+
+type OrderEvent struct {
+    OrderID int
+    Phone   string
+    Status  string
+}
 ```

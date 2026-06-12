@@ -1,64 +1,94 @@
 ---
 title: Setup
-description: Environment variables, Make commands, and getting started guide.
+description: Development environment setup and configuration.
 icon: Settings
 ---
+
+## Prerequisites
+
+- Go 1.22+
+- SQLite (installed automatically via `modernc.org/sqlite`)
+- `wrangler` CLI (for Cloudflare D1 access)
 
 ## Quick Start
 
 ```bash
-# Clone and setup
-cp .env.example .env.local
-# Edit .env.local with your credentials
+# Export production D1 database to local SQLite
+make dev-db
 
-# Start development
-make dev        # export prod DB + start server
-make run        # just start server
-make stop       # kill running server
+# Start dev server on :8080
+make run
 ```
 
 ## Environment Variables
 
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `APP_ENV` | No | `development` (default) or `production` |
-| `JWT_SECRET` | Yes | HMAC signing key (panics if empty) |
-| `PORT` | No | HTTP port (default 8080) |
-| `LOCAL_DB_PATH` | No | SQLite file path |
-| `CLOUDFLARE_API_TOKEN` | Prod | D1 API token |
-| `CLOUDFLARE_ACCOUNT_ID` | Prod | Cloudflare account ID |
-| `CLOUDFLARE_DATABASE_ID` | Prod | D1 database ID |
-| `MEILISEARCH_URL` | No | Meilisearch server URL |
-| `MEILISEARCH_API_KEY` | No | Meilisearch API key |
-| `R2_ACCESS_KEY_ID` | No | R2 access key |
-| `R2_SECRET_ACCESS_KEY` | No | R2 secret key |
-| `R2_BUCKET_NAME` | No | R2 bucket name |
-| `WHATSAPP_API_TOKEN` | No | WhatsApp Cloud API token |
-| `WHATSAPP_PHONE_NUMBER_ID` | No | WhatsApp phone number ID |
+Copy `.env.example` to `.env` and configure:
 
-## Make Commands
+| Variable | Required | Default | Description |
+|----------|----------|---------|-------------|
+| `JWT_SECRET` | Yes |  | HMAC-SHA256 signing key (panics if empty) |
+| `APP_ENV` | No | `development` | `development` (SQLite) or `production` (D1) |
+| `LOCAL_DB_PATH` | No | `.data/dev.sqlite` | SQLite file path |
+| `CLOUDFLARE_API_TOKEN` | Prod |  | Cloudflare API token |
+| `CLOUDFLARE_ACCOUNT_ID` | Prod |  | Cloudflare account ID |
+| `CLOUDFLARE_DATABASE_ID` | Prod |  | D1 database ID |
+| `MEILISEARCH_URL` | No |  | Meilisearch instance URL |
+| `MEILISEARCH_API_KEY` | No |  | Meilisearch API key |
+| `R2_ACCOUNT_ID` | No |  | Cloudflare R2 account ID |
+| `R2_ACCESS_KEY_ID` | No |  | R2 access key |
+| `R2_SECRET_ACCESS_KEY` | No |  | R2 secret key |
+| `R2_BUCKET_NAME` | No |  | R2 bucket name |
+| `WHATSAPP_PHONE_NUMBER_ID` | No |  | WhatsApp Business phone number ID |
+| `WHATSAPP_ACCESS_TOKEN` | No |  | WhatsApp Cloud API access token |
+
+## Make Targets
+
+| Target | Description |
+|--------|-------------|
+| `make dev-db` | Export prod D1 → local SQLite |
+| `make run` | Start dev server |
+| `make dev` | `dev-db` + `run` |
+| `make stop` | Kill running server (frees :8080) |
+| `make watch` | Hot reload (requires `air`) |
+| `make build` | Compile all packages |
+| `make test` | Run tests |
+| `make test-endpoints` | 64-endpoint integration test |
+| `make migrate-up` | Apply pending migrations |
+| `make migrate-down` | Rollback latest migration |
+| `make migrate-status` | Show migration status |
+| `make docs` | Build and serve docs |
+| `make docs-update` | Regenerate OpenAPI spec + build docs |
+
+## Dual Entry Points
+
+### Standalone HTTP Server
 
 ```bash
-make help             # show all targets
-make build            # compile all packages
-make test             # run tests (no test files yet)
-make test-endpoints   # run 64 endpoint integration tests
-make migrate-up       # apply pending migrations
-make migrate-down     # rollback latest migration
-make migrate-status   # show applied/pending migrations
-make build-lambda     # cross-compile for AWS Lambda
-make deploy-lambda    # push binary to AWS Lambda
+make run    # or: go run .
 ```
 
-## Env Files
+### AWS Lambda
+
+```bash
+make build-lambda    # builds to bootstrap + lambda.zip
+make deploy-lambda   # updates Lambda function
+```
+
+Both entry points share the identical `newHandler()` wiring logic.
+
+## Hot Reload
+
+Requires `air`:
+
+```bash
+go install github.com/air-verse/air@latest
+make watch
+```
+
+## Environment Files
 
 `.env` (shared defaults) → `.env.local` (personal, gitignored). Loaded by `godotenv` at startup.
 
-## Docs Commands
+## No Test Files
 
-```bash
-cd docs
-bun install     # install dependencies
-bun run dev     # start docs dev server on :3000
-bun run build   # build static docs
-```
+There are zero `_test.go` files. `go test ./...` is a no-op. The `test-endpoints` script runs integration tests against a live server.

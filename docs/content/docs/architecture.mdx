@@ -4,40 +4,40 @@ description: Layered architecture with event-driven pub/sub for cross-service co
 icon: Layers
 ---
 
-Layered architecture with event-driven pub/sub for cross-service communication. Each service follows the Repository pattern with clean separation of concerns.
+Clean layered architecture with event-driven pub/sub. Each service follows the Repository pattern with clear separation of concerns.
 
 ## System Flow
 
-```text
-HTTP Request
-  → main.go (Go 1.22+ method/path routing)
-    → auth middleware (JWT validation, user injection)
-      → service handler (decode JSON, validate, call repository)
-        → repository (SQL, transactions via database.DB)
-          → database adapter (SQLite or D1 HTTP API)
-        ← domain struct
-      → on mutation: publish event to eventbus.Bus
-        → subscriber goroutines (search sync, notifications)
-    ← HTTP Response (JSON)
-```
+<Mermaid
+  chart="
+graph LR
+  Client[HTTP Client] --> main[main.go]
+  main --> mw[Auth Middleware]
+  mw --> handler[Service Handler]
+  handler --> repo[Repository]
+  repo --> db[(Database)]
+  handler --> bus[eventbus.Bus]
+  bus --> search[Search Subscriber]
+  bus --> notify[Notification Subscriber]
+  handler --> resp[HTTP Response]
+"
+/>
 
 ## Layer Responsibilities
 
-| Layer | Owns | Must not own |
+| Layer | Owns | Must Not Own |
 |-------|------|--------------|
-| `server` | JSON response helpers, request logging | Business logic, data access |
+| `server` | JSON helpers, request logging | Business logic, data access |
 | Auth middleware | JWT validation, user injection | Business logic |
-| Service handlers | HTTP decode/validate/respond, route registration | SQL, row mapping, transactions |
-| Repositories | SQL queries, row mapping, transaction orchestration | HTTP handling, validation |
-| `database` | `DB`/`Tx`/`Row` interfaces, adapter implementations | SQL queries |
-| `eventbus` | Event pub/sub, handler registration | Business logic |
-| `config` | Env loading, config struct construction | Business logic |
+| Service handlers | HTTP decode/validate/respond, routing | SQL, transactions |
+| Repositories | SQL, row mapping, transactions | HTTP, validation |
+| `database` | `DB`/`Tx`/`Row` interfaces | SQL queries |
+| `eventbus` | Pub/sub, handler registration | Business logic |
+| `config` | Env loading, config structs | Business logic |
 
 ## Service Pattern
 
-Each service has two layers:
-
-**Repository** — owns SQL, row mapping, and transactions:
+**Repository**  owns SQL, row mapping, transactions:
 
 ```go
 type Repository interface {
@@ -49,10 +49,13 @@ type Repository interface {
 }
 ```
 
-**Service (handlers)** — thin HTTP adapters, delegate to repository:
+**Service (handlers)**  thin HTTP adapters, delegate to repository:
 
 ```go
-type Service struct { repo Repository; bus eventbus.Bus }
+type Service struct {
+    repo Repository
+    bus  eventbus.Bus
+}
 
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
     mux.HandleFunc("POST /path", s.handler)
@@ -61,20 +64,46 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 
 ## Authentication Flow
 
-```text
-Client                    Server                    Google
-  │                         │                         │
-  ├─ POST /auth/google ────→│                         │
-  │   { idToken: "..." }    │                         │
-  │                         ├─ GET /oauth2/v3/certs ─→│
-  │                         │←─ JWKS public keys ─────┤
-  │                         ├─ Verify JWT signature    │
-  │                         ├─ Create/find user        │
-  │                         ├─ Generate tokens         │
-  │←─ Set-Cookie ───────────┤                         │
-  │   access_token (15min)  │                         │
-  │   refresh_token (7d)    │                         │
-```
+<Mermaid
+  chart="
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  participant G as Google
+
+  C->>S: POST /auth/google { idToken }
+  S->>G: GET /oauth2/v3/certs
+  G-->>S: JWKS public keys
+  S->>S: Verify JWT signature
+  S->>S: Create/find user
+  S->>S: Generate tokens
+  S-->>C: Set-Cookie (access_token 15min, refresh_token 7d)
+"
+/>
+
+### Token Strategy
+
+- **Access token**: HMAC-SHA256 JWT, 15-minute expiry, HttpOnly cookie
+- **Refresh token**: 64-char hex, 7-day expiry, stored in DB + HttpOnly cookie
+- No tokens in response body  all cookie-based
+
+## Middleware Chain
+
+<Mermaid
+  chart="
+flowchart LR
+  A[Request] --> B{WithOptionalAuth}
+  B --> C[WithAuth]
+  C --> D{WithAdmin}
+  D --> E[Handler]
+"
+/>
+
+| Middleware | Purpose |
+|-----------|---------|
+| `WithAuth` | Validates JWT from cookie/header, injects user into context |
+| `WithAdmin` | Requires `role=admin` after `WithAuth` |
+| `WithOptionalAuth` | Attaches user if present, proceeds unauthenticated if not |
 
 ## Known Risks
 

@@ -1,48 +1,53 @@
 ---
 title: Overview
-description: KR Crackers e-commerce backend — Go API, Cloudflare D1, event-driven architecture.
-icon: Rocket
+description: E-commerce backend for KR Crackers  order management, product catalog, and admin dashboard.
+icon: ShoppingCart
 ---
 
-KR Crackers is a customer-facing e-commerce backend for a fireworks/crackers business. It handles product catalog, order lifecycle, payment proof uploads, PDF invoices, and WhatsApp notifications.
+Go-powered e-commerce backend with order lifecycle management, product catalog, search, and admin dashboard. Built with clean layered architecture and event-driven pub/sub.
 
-## Stats
+## Features
 
-| Metric | Value |
-|--------|-------|
-| Services | 8 |
-| Endpoints | 64 |
-| Migrations | 9 |
-| DB Backends | 2 |
-
-## Key Features
-
-<Cards>
-  <Card title="Authentication" href="/docs/api/auth" description="JWT + refresh tokens, Google ID token login, role-based access" />
-  <Card title="Products" href="/docs/api/products" description="CRUD with search, filtering, sorting, Meilisearch-powered" />
-  <Card title="Orders" href="/docs/api/orders" description="Checkout, status transitions, admin management" />
-  <Card title="Architecture" href="/docs/architecture" description="Layered architecture with event-driven pub/sub" />
-</Cards>
+- **Order Lifecycle**  Pending → Confirmed → Shipped → Delivered / Cancelled
+- **Product Catalog**  CRUD with search, filtering, sorting via Meilisearch
+- **Auth**  Google OAuth + email/password, JWT + refresh tokens in HttpOnly cookies
+- **Event-Driven**  In-memory pub/sub for cross-service communication
+- **Admin Dashboard**  Order management, stats, product CRUD
+- **PDF Invoices**  On-demand generation with sequential numbering
+- **WhatsApp Notifications**  Order status updates via Cloud API
+- **Dual Deployment**  Standalone HTTP server or AWS Lambda
 
 ## Tech Stack
 
-- **Language**: Go 1.26.3
-- **Database**: Cloudflare D1 (prod) / SQLite (dev)
-- **Search**: Meilisearch
-- **Storage**: Cloudflare R2 (S3-compatible)
-- **Notifications**: WhatsApp Cloud API
-- **Auth**: JWT + Google JWKS
-- **Deploy**: AWS Lambda (arm64)
+| Layer | Technology |
+|-------|-----------|
+| Language | Go 1.22+ |
+| Database | SQLite (dev) / Cloudflare D1 (prod) |
+| Search | Meilisearch |
+| Storage | Cloudflare R2 (S3-compatible) |
+| Notifications | WhatsApp Cloud API |
+| Auth | JWT (HS256) + Google JWKS |
+| PDF | gofpdf |
+| Deploy | HTTP server / AWS Lambda |
 
 ## Quick Start
 
 ```bash
-# Clone and setup
-cp .env.example .env.local
-# Edit .env.local with your credentials
-
-# Start development
-make dev        # export prod DB + start server
-make run        # just start server
-make stop       # kill running server
+make dev-db    # Export prod D1 → local SQLite
+make run       # Start dev server on :8080
 ```
+
+## API Overview
+
+| Service | Base Path | Auth |
+|---------|-----------|------|
+| Auth | `/auth/*` | Public |
+| Customers | `/customers/*` | WithAuth |
+| Products | `/products/*` (reads), `/admin/products` (writes) | Public reads, admin writes |
+| Orders | `/orders/*`, `/orders/checkout` | Mixed |
+| Admin | `/admin/*` | WithAuth + WithAdmin |
+| Invoices | `/invoices/{id}` | WithAuth |
+
+## Links
+
+<Card title="GitHub" href="https://github.com/thaletto/krcrackers-go" />

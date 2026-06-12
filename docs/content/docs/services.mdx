@@ -1,51 +1,182 @@
 ---
 title: Services
-description: Eight domain services with repositories, handlers, and event publishing.
+description: Domain services  each follows the Repository pattern with clean separation of concerns.
 icon: Boxes
 ---
 
-Eight domain services, each with its own repository, HTTP handlers, and route registration.
+Each service has two layers: **Repository** (SQL + row mapping) and **Service** (HTTP handlers that delegate to repository).
 
 ## Service Overview
 
-| Service | Package | Auth | Description |
-|---------|---------|------|-------------|
-| Auth | `services/auth/` | Public + middleware | Register, login, Google login, refresh, logout, /me |
-| Customers | `services/customers/` | WithAuth | Profile CRUD, address CRUD with set-default |
-| Products | `services/products/` | Public reads, admin writes | CRUD, search/filter/sort, event publishing |
-| Orders | `services/orders/` | Public + auth + admin | Checkout, customer orders, admin management, dashboard |
-| Search | `services/search/` | None (internal) | Meilisearch sync via event subscriber |
-| Uploads | `services/uploads/` | None (internal) | R2 file uploads for payment screenshots |
-| Notifications | `services/notifications/` | None (internal) | WhatsApp Cloud API via event subscriber |
-| Invoices | `services/invoices/` | WithAuth | On-demand PDF invoice generation |
+<Mermaid
+  chart="
+graph TB
+  subgraph Services
+    Auth[Auth]
+    Customers[Customers]
+    Products[Products]
+    Orders[Orders]
+    Invoices[Invoices]
+  end
+  subgraph Internal
+    Search[Search]
+    Uploads[Uploads]
+    Notify[Notifications]
+  end
+  Auth --> Users[(users)]
+  Customers --> Addrs[(customer_addresses)]
+  Products --> Prods[(products)]
+  Orders --> OrdTbl[(orders)]
+  Orders --> Items[(order_items)]
+  Products -->|events| Search
+  Orders -->|events| Notify
+  Orders -->|upload| Uploads
+  Invoices --> Orders
+"
+/>
 
-## Service Files
+## Auth
 
-| Service | Files |
-|---------|-------|
-| `services/auth/` | `main.go`, `repository.go`, `jwt.go`, `google.go`, `password.go`, `middleware.go` |
-| `services/customers/` | `main.go`, `repository.go` |
-| `services/products/` | `main.go`, `repository.go` |
-| `services/orders/` | `main.go`, `repository.go` |
-| `services/search/` | `main.go`, `subscriber.go` |
-| `services/uploads/` | `main.go` |
-| `services/notifications/` | `main.go`, `subscriber.go` |
-| `services/invoices/` | `main.go` |
+Handles user registration, login, Google OAuth, JWT management.
 
-## Module Boundaries
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/auth/register` | POST | Public | Register with email+password |
+| `/auth/login` | POST | Public | Login with email+password |
+| `/auth/google` | POST | Public | Login with Google ID token |
+| `/auth/refresh` | POST | Public (cookie) | Rotate refresh token |
+| `/auth/logout` | POST | Public | Revoke token, clear cookies |
+| `/auth/me` | GET | WithAuth | Current user profile |
 
-| Boundary | What belongs here | What must not be here |
-|----------|-------------------|------------------------|
-| `config/` | Env loading, `Config` struct | Business logic, HTTP handlers |
-| `database/` | `DB`/`Tx`/`Row` interfaces | SQL queries (belong in repositories) |
-| `server/` | HTTP response helpers | Business logic, data access |
-| `eventbus/` | Event pub/sub | Business logic |
-| `adapters/` | Interface adapters | Business logic |
-| `services/*/` | HTTP handlers + repository | Cross-domain logic |
+## Customers
 
-## Naming Conventions
+Profile and address CRUD with "set default" logic.
 
-- Files: lowercase, short descriptive (`database.go`, `sqlite.go`, `repository.go`)
-- Packages: lowercase singular (`products`, `orders`, `database`, `server`)
-- Exported: PascalCase (`NewService`, `NewRepository`, `WriteJSON`)
-- Unexported: camelCase (`rowToProduct`, `validateProductInput`)
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/customers/profile` | GET | WithAuth | Get profile |
+| `/customers/profile` | PUT | WithAuth | Update profile |
+| `/customers/addresses` | GET | WithAuth | List addresses |
+| `/customers/addresses` | POST | WithAuth | Create address |
+| `/customers/addresses/{id}` | PUT | WithAuth | Update address |
+| `/customers/addresses/{id}` | DELETE | WithAuth | Delete address |
+| `/customers/addresses/{id}/default` | PUT | WithAuth | Set as default |
+
+## Products
+
+Catalog with search, filtering, sorting. Publishes events to event bus.
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/products` | GET | Public | List/search (q, category, brand, price range, sort) |
+| `/products/{id}` | GET | Public | Get single product |
+| `/admin/products` | POST | Admin | Create product |
+| `/admin/products/{id}` | PUT | Admin | Update product |
+| `/admin/products/{id}` | DELETE | Admin | Delete product |
+
+### Query Parameters
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `q` | string | Full-text search |
+| `category` | string | Filter by category |
+| `brand` | string | Filter by brand |
+| `min_price` | float | Minimum price |
+| `max_price` | float | Maximum price |
+| `sort` | string | `price_asc`, `price_desc`, `name_asc`, `name_desc` |
+| `limit` | int | Max results (0 = all) |
+| `offset` | int | Pagination offset |
+
+## Orders
+
+Full order lifecycle: checkout → status updates → events.
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/orders/checkout` | POST | WithAuth | Place order (multipart: address, items, screenshot) |
+| `/orders/my` | GET | WithAuth | List my orders |
+| `/orders/my/{id}` | GET | WithAuth | Get my order |
+| `/orders/my/{id}` | DELETE | WithAuth | Cancel pending order |
+| `/admin/orders` | GET | Admin | List all orders |
+| `/admin/orders/{id}` | GET | Admin | Get order details |
+| `/admin/orders/{id}/status` | PATCH | Admin | Update status (triggers events) |
+| `/admin/dashboard` | GET | Admin | Stats: total, pending, revenue, new customers |
+
+### Order Status State Machine
+
+<Mermaid
+  chart="
+stateDiagram-v2
+  pending --> confirmed: confirm
+  pending --> cancelled: cancel
+  confirmed --> shipped: ship
+  confirmed --> cancelled: cancel
+  shipped --> delivered: deliver
+  shipped --> cancelled: cancel
+  delivered : terminal
+  cancelled : terminal
+"
+/>
+
+### Checkout Flow
+
+<Mermaid
+  chart="
+sequenceDiagram
+  participant C as Client
+  participant S as Server
+  participant R as R2 Storage
+  participant E as Event Bus
+
+  C->>S: POST /orders/checkout (multipart)
+  S->>R: Upload payment screenshot
+  R-->>S: File URL
+  S->>S: Create order + items in DB
+  S->>E: Publish order.placed
+  E-->>Notify: WhatsApp notification
+  S-->>C: Order created
+"
+/>
+
+## Invoices
+
+PDF generation with sequential numbering.
+
+| Endpoint | Method | Auth | Description |
+|----------|--------|------|-------------|
+| `/invoices/{id}` | GET | WithAuth | Download PDF invoice |
+| `/admin/invoices/{id}` | GET | Admin | Download PDF invoice |
+
+Invoice numbers: `INV-0001`, `INV-0002`, etc. Stored in `invoice_counters` table and assigned on first generation.
+
+## Search (Internal)
+
+Meilisearch integration  subscribes to product events, syncs index.
+
+<Mermaid
+  chart="
+flowchart LR
+  P[Products Service] -->|product.created| EB[Event Bus]
+  P -->|product.updated| EB
+  P -->|product.deleted| EB
+  EB --> S[Search Subscriber]
+  S --> M[(Meilisearch)]
+"
+/>
+
+## Notifications (Internal)
+
+WhatsApp Cloud API  subscribes to order events, sends template messages. No-op when credentials absent.
+
+<Mermaid
+  chart="
+flowchart LR
+  O[Orders Service] -->|order.placed| EB[Event Bus]
+  O -->|order.confirmed| EB
+  O -->|order.shipped| EB
+  O -->|order.delivered| EB
+  O -->|order.cancelled| EB
+  EB --> N[Notification Subscriber]
+  N --> W[WhatsApp Cloud API]
+"
+/>

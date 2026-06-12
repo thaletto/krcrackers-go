@@ -1,43 +1,92 @@
 ---
 title: Database
-description: Dual backend with SQLite (dev) and Cloudflare D1 (prod), typed row accessors.
+description: Dual backend with SQLite (dev) and Cloudflare D1 (prod).
 icon: Database
 ---
 
-Same `database.DB` interface for both local SQLite and Cloudflare D1. Rows use typed accessors: `row.Int()`, `row.String()`, `row.Float()`, `row.NullableString()`.
+Same `database.DB` interface for both backends. The adapter is selected at startup based on environment.
 
-## Dual Backend
+## Interface
 
-| Backend | Driver | Transactions | Used in |
-|---------|--------|-------------|---------|
-| SQLite | `modernc.org/sqlite` (pure-Go, no CGo) | Real atomic `*sql.Tx` | Development |
-| Cloudflare D1 | `cloudflare-go/v7` (HTTP API) | Best-effort (buffers on commit) | Production |
+```go
+type DB interface {
+    Query(ctx context.Context, query string, args ...any) ([]Row, error)
+    Execute(ctx context.Context, query string, args ...any) (int64, error)
+    Begin(ctx context.Context) (Tx, error)
+    Close() error
+}
 
-## Adding a Backend
-
-One new file implementing `DB` + `Tx` + `Row` + a case in `database.New`.
-
-## Migrations
-
-Embedded SQL migrations in goose format. Server does **not** auto-migrate on boot.
-
-```bash
-make migrate-up       # apply pending
-make migrate-down     # rollback latest
-make migrate-status   # show applied/pending
+type Row interface {
+    Int(name string) int
+    Float(name string) float64
+    String(name string) string
+    NullableString(name string) *string
+}
 ```
 
-New migration: add `migrations/NNNN_name.sql` with `-- +goose Up` / `-- +goose Down` sections.
+## Backends
 
-## Tables
+<Mermaid
+  chart="
+flowchart TB
+  App[Application] --> DB[(database.DB)]
+  DB --> SQLite[SQLite\nmodernc.org/sqlite]
+  DB --> D1[Cloudflare D1\nHTTP API]
+  SQLite --> File[.data/dev.sqlite]
+  D1 --> CF[D1 Database]
+"
+/>
+
+### SQLite (Development)
+
+- Pure Go, no CGO required
+- WAL journal mode + foreign keys enabled
+- **Real atomicity** via `*sql.Tx` wrappers
+- Path defaults to `.data/dev.sqlite`
+
+### Cloudflare D1 (Production)
+
+- HTTP API via `cloudflare-go/v7`
+- Requires `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_DATABASE_ID`
+- **Transactions are best-effort**: buffers statements, executes sequentially on commit
+- Crash mid-commit leaves partial state
+
+<Callout type="warn">
+D1 transactions are not truly atomic. A crash during commit can leave the database in an inconsistent state.
+</Callout>
+
+## Schema
 
 | Table | Purpose |
 |-------|---------|
-| `products` | Product catalog |
-| `products_fts` | FTS5 virtual table for search |
-| `users` | User accounts with auth provider |
-| `customer_addresses` | Customer shipping addresses |
-| `orders` | Order headers with status and address snapshot |
-| `order_items` | Order line items |
+| `products` | Product catalog (name, price, brand, category, image) |
+| `orders` | Order headers (status, user, address, totals, payment screenshot) |
+| `order_items` | Line items per order |
+| `products_fts` | Full-text search virtual table (FTS5) |
+| `users` | User accounts (email, name, phone, auth_provider, role) |
+| `customer_addresses` | Shipping addresses per user |
 | `refresh_tokens` | JWT refresh tokens |
 | `invoice_counters` | Sequential invoice number counter |
+| `schema_migrations` | Applied migration versions |
+
+## Migrations
+
+```bash
+make migrate-up       # Apply pending
+make migrate-down     # Rollback latest
+make migrate-status   # Show applied/pending
+```
+
+New migrations: add `migrations/NNNN_name.sql` with goose-style `-- +goose Up` / `-- +goose Down` sections. The runner embeds `*.sql` via `//go:embed`.
+
+## Type Safety
+
+The `Row` interface returns `TypeError` on type mismatch instead of silently returning zero values:
+
+```go
+// Returns error if column is not an integer
+id := row.Int("id")
+
+// Returns nil if column is NULL
+name := row.NullableString("name")
+```
