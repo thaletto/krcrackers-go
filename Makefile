@@ -5,7 +5,7 @@ AIR        := $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH 2>/de
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda test test-endpoints clean wrangler-login
+.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda test test-endpoints clean wrangler-login docs-dev docs-build docs-start
 
 help:                ## Show this help message
 	@echo "Targets:"
@@ -67,3 +67,12 @@ clean:               ## Remove .data/ and .wrangler/
 
 wrangler-login:      ## Authenticate wrangler with Cloudflare
 	wrangler login
+
+docs-dev:            ## Start docs dev server (requires bun)
+	cd docs && bun install && bun run dev
+
+docs-build:          ## Build static docs site
+	cd docs && bun run build
+
+docs-start:          ## Preview built docs
+	cd docs && bun run start

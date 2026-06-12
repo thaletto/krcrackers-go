@@ -1,0 +1,51 @@
+---
+title: Services
+description: Eight domain services with repositories, handlers, and event publishing.
+icon: Boxes
+---
+
+Eight domain services, each with its own repository, HTTP handlers, and route registration.
+
+## Service Overview
+
+| Service | Package | Auth | Description |
+|---------|---------|------|-------------|
+| Auth | `services/auth/` | Public + middleware | Register, login, Google login, refresh, logout, /me |
+| Customers | `services/customers/` | WithAuth | Profile CRUD, address CRUD with set-default |
+| Products | `services/products/` | Public reads, admin writes | CRUD, search/filter/sort, event publishing |
+| Orders | `services/orders/` | Public + auth + admin | Checkout, customer orders, admin management, dashboard |
+| Search | `services/search/` | None (internal) | Meilisearch sync via event subscriber |
+| Uploads | `services/uploads/` | None (internal) | R2 file uploads for payment screenshots |
+| Notifications | `services/notifications/` | None (internal) | WhatsApp Cloud API via event subscriber |
+| Invoices | `services/invoices/` | WithAuth | On-demand PDF invoice generation |
+
+## Service Files
+
+| Service | Files |
+|---------|-------|
+| `services/auth/` | `main.go`, `repository.go`, `jwt.go`, `google.go`, `password.go`, `middleware.go` |
+| `services/customers/` | `main.go`, `repository.go` |
+| `services/products/` | `main.go`, `repository.go` |
+| `services/orders/` | `main.go`, `repository.go` |
+| `services/search/` | `main.go`, `subscriber.go` |
+| `services/uploads/` | `main.go` |
+| `services/notifications/` | `main.go`, `subscriber.go` |
+| `services/invoices/` | `main.go` |
+
+## Module Boundaries
+
+| Boundary | What belongs here | What must not be here |
+|----------|-------------------|------------------------|
+| `config/` | Env loading, `Config` struct | Business logic, HTTP handlers |
+| `database/` | `DB`/`Tx`/`Row` interfaces | SQL queries (belong in repositories) |
+| `server/` | HTTP response helpers | Business logic, data access |
+| `eventbus/` | Event pub/sub | Business logic |
+| `adapters/` | Interface adapters | Business logic |
+| `services/*/` | HTTP handlers + repository | Cross-domain logic |
+
+## Naming Conventions
+
+- Files: lowercase, short descriptive (`database.go`, `sqlite.go`, `repository.go`)
+- Packages: lowercase singular (`products`, `orders`, `database`, `server`)
+- Exported: PascalCase (`NewService`, `NewRepository`, `WriteJSON`)
+- Unexported: camelCase (`rowToProduct`, `validateProductInput`)

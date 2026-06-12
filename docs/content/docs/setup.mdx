@@ -1,0 +1,64 @@
+---
+title: Setup
+description: Environment variables, Make commands, and getting started guide.
+icon: Settings
+---
+
+## Quick Start
+
+```bash
+# Clone and setup
+cp .env.example .env.local
+# Edit .env.local with your credentials
+
+# Start development
+make dev        # export prod DB + start server
+make run        # just start server
+make stop       # kill running server
+```
+
+## Environment Variables
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `APP_ENV` | No | `development` (default) or `production` |
+| `JWT_SECRET` | Yes | HMAC signing key (panics if empty) |
+| `PORT` | No | HTTP port (default 8080) |
+| `LOCAL_DB_PATH` | No | SQLite file path |
+| `CLOUDFLARE_API_TOKEN` | Prod | D1 API token |
+| `CLOUDFLARE_ACCOUNT_ID` | Prod | Cloudflare account ID |
+| `CLOUDFLARE_DATABASE_ID` | Prod | D1 database ID |
+| `MEILISEARCH_URL` | No | Meilisearch server URL |
+| `MEILISEARCH_API_KEY` | No | Meilisearch API key |
+| `R2_ACCESS_KEY_ID` | No | R2 access key |
+| `R2_SECRET_ACCESS_KEY` | No | R2 secret key |
+| `R2_BUCKET_NAME` | No | R2 bucket name |
+| `WHATSAPP_API_TOKEN` | No | WhatsApp Cloud API token |
+| `WHATSAPP_PHONE_NUMBER_ID` | No | WhatsApp phone number ID |
+
+## Make Commands
+
+```bash
+make help             # show all targets
+make build            # compile all packages
+make test             # run tests (no test files yet)
+make test-endpoints   # run 64 endpoint integration tests
+make migrate-up       # apply pending migrations
+make migrate-down     # rollback latest migration
+make migrate-status   # show applied/pending migrations
+make build-lambda     # cross-compile for AWS Lambda
+make deploy-lambda    # push binary to AWS Lambda
+```
+
+## Env Files
+
+`.env` (shared defaults) → `.env.local` (personal, gitignored). Loaded by `godotenv` at startup.
+
+## Docs Commands
+
+```bash
+cd docs
+bun install     # install dependencies
+bun run dev     # start docs dev server on :3000
+bun run build   # build static docs
+```

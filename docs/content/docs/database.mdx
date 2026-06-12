@@ -1,0 +1,43 @@
+---
+title: Database
+description: Dual backend with SQLite (dev) and Cloudflare D1 (prod), typed row accessors.
+icon: Database
+---
+
+Same `database.DB` interface for both local SQLite and Cloudflare D1. Rows use typed accessors: `row.Int()`, `row.String()`, `row.Float()`, `row.NullableString()`.
+
+## Dual Backend
+
+| Backend | Driver | Transactions | Used in |
+|---------|--------|-------------|---------|
+| SQLite | `modernc.org/sqlite` (pure-Go, no CGo) | Real atomic `*sql.Tx` | Development |
+| Cloudflare D1 | `cloudflare-go/v7` (HTTP API) | Best-effort (buffers on commit) | Production |
+
+## Adding a Backend
+
+One new file implementing `DB` + `Tx` + `Row` + a case in `database.New`.
+
+## Migrations
+
+Embedded SQL migrations in goose format. Server does **not** auto-migrate on boot.
+
+```bash
+make migrate-up       # apply pending
+make migrate-down     # rollback latest
+make migrate-status   # show applied/pending
+```
+
+New migration: add `migrations/NNNN_name.sql` with `-- +goose Up` / `-- +goose Down` sections.
+
+## Tables
+
+| Table | Purpose |
+|-------|---------|
+| `products` | Product catalog |
+| `products_fts` | FTS5 virtual table for search |
+| `users` | User accounts with auth provider |
+| `customer_addresses` | Customer shipping addresses |
+| `orders` | Order headers with status and address snapshot |
+| `order_items` | Order line items |
+| `refresh_tokens` | JWT refresh tokens |
+| `invoice_counters` | Sequential invoice number counter |

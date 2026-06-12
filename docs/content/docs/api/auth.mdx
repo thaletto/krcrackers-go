@@ -1,0 +1,57 @@
+---
+title: Authentication
+description: JWT + refresh tokens, Google ID token login, role-based access control.
+icon: Lock
+---
+
+JWT + refresh tokens stored in HttpOnly cookies. No tokens in response body. Google login validates ID tokens via JWKS.
+
+## Endpoints
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/auth/register` | Public | Register with email/password |
+| `POST` | `/auth/login` | Public | Login with email/password |
+| `POST` | `/auth/google` | Public | Login with Google ID token |
+| `POST` | `/auth/refresh` | Public | Refresh access token |
+| `POST` | `/auth/logout` | Public | Clear tokens |
+| `GET` | `/auth/me` | WithAuth | Get current user |
+
+## Auth Flow
+
+1. Client sends ID token to `POST /auth/google`
+2. Server validates via Google JWKS (cached 6h)
+3. Server creates/finds user by email
+4. Server generates:
+   - `access_token` cookie (15min, HMAC-SHA256)
+   - `refresh_token` cookie (7d, random 64-char hex)
+5. `refresh_token` stored in `refresh_tokens` table
+6. On `/auth/refresh`: rotate refresh token, issue new access token
+7. On `/auth/logout`: delete refresh token, clear cookies
+
+## Middleware
+
+| Middleware | Behavior |
+|------------|----------|
+| `WithAuth` | Required. Returns 401 if no valid token. |
+| `WithAdmin` | Required + admin role. Returns 403 if not admin. Chain after WithAuth. |
+| `WithOptionalAuth` | Attaches user if present, proceeds unauthenticated otherwise. |
+
+## Request Example
+
+```bash
+# Register
+curl -X POST http://localhost:8080/auth/register \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"secret","name":"John"}'
+
+# Login
+curl -X POST http://localhost:8080/auth/login \
+  -H "Content-Type: application/json" \
+  -d '{"email":"user@example.com","password":"secret"}'
+
+# Google login
+curl -X POST http://localhost:8080/auth/google \
+  -H "Content-Type: application/json" \
+  -d '{"idToken":"eyJ..."}'
+```

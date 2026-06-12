@@ -1,0 +1,19 @@
+{
+  "title": "Documentation",
+  "pages": [
+    "---Introduction---",
+    "index",
+    "---Architecture---",
+    "architecture",
+    "services",
+    "events",
+    "---API Reference---",
+    "api",
+    "---Database---",
+    "database",
+    "---Deployment---",
+    "deployment",
+    "---Setup---",
+    "setup"
+  ]
+}

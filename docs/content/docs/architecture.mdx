@@ -1,0 +1,82 @@
+---
+title: Architecture
+description: Layered architecture with event-driven pub/sub for cross-service communication.
+icon: Layers
+---
+
+Layered architecture with event-driven pub/sub for cross-service communication. Each service follows the Repository pattern with clean separation of concerns.
+
+## System Flow
+
+```text
+HTTP Request
+  → main.go (Go 1.22+ method/path routing)
+    → auth middleware (JWT validation, user injection)
+      → service handler (decode JSON, validate, call repository)
+        → repository (SQL, transactions via database.DB)
+          → database adapter (SQLite or D1 HTTP API)
+        ← domain struct
+      → on mutation: publish event to eventbus.Bus
+        → subscriber goroutines (search sync, notifications)
+    ← HTTP Response (JSON)
+```
+
+## Layer Responsibilities
+
+| Layer | Owns | Must not own |
+|-------|------|--------------|
+| `server` | JSON response helpers, request logging | Business logic, data access |
+| Auth middleware | JWT validation, user injection | Business logic |
+| Service handlers | HTTP decode/validate/respond, route registration | SQL, row mapping, transactions |
+| Repositories | SQL queries, row mapping, transaction orchestration | HTTP handling, validation |
+| `database` | `DB`/`Tx`/`Row` interfaces, adapter implementations | SQL queries |
+| `eventbus` | Event pub/sub, handler registration | Business logic |
+| `config` | Env loading, config struct construction | Business logic |
+
+## Service Pattern
+
+Each service has two layers:
+
+**Repository** — owns SQL, row mapping, and transactions:
+
+```go
+type Repository interface {
+    Create(ctx context.Context, input ProductInput) (Product, error)
+    List(ctx context.Context, limit, offset int) (ListProductsResponse, error)
+    Get(ctx context.Context, id int) (Product, error)
+    Update(ctx context.Context, id int, input ProductInput) (Product, error)
+    Delete(ctx context.Context, id int) error
+}
+```
+
+**Service (handlers)** — thin HTTP adapters, delegate to repository:
+
+```go
+type Service struct { repo Repository; bus eventbus.Bus }
+
+func (s *Service) RegisterRoutes(mux *http.ServeMux) {
+    mux.HandleFunc("POST /path", s.handler)
+}
+```
+
+## Authentication Flow
+
+```text
+Client                    Server                    Google
+  │                         │                         │
+  ├─ POST /auth/google ────→│                         │
+  │   { idToken: "..." }    │                         │
+  │                         ├─ GET /oauth2/v3/certs ─→│
+  │                         │←─ JWKS public keys ─────┤
+  │                         ├─ Verify JWT signature    │
+  │                         ├─ Create/find user        │
+  │                         ├─ Generate tokens         │
+  │←─ Set-Cookie ───────────┤                         │
+  │   access_token (15min)  │                         │
+  │   refresh_token (7d)    │                         │
+```
+
+## Known Risks
+
+- **D1 transactions not atomic**: `d1Tx.Commit()` executes sequentially; crash mid-commit leaves partial state
+- **No test files**: Zero `_test.go` files; regressions undetected

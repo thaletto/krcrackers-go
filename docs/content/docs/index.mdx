@@ -1,0 +1,48 @@
+---
+title: Overview
+description: KR Crackers e-commerce backend — Go API, Cloudflare D1, event-driven architecture.
+icon: Rocket
+---
+
+KR Crackers is a customer-facing e-commerce backend for a fireworks/crackers business. It handles product catalog, order lifecycle, payment proof uploads, PDF invoices, and WhatsApp notifications.
+
+## Stats
+
+| Metric | Value |
+|--------|-------|
+| Services | 8 |
+| Endpoints | 64 |
+| Migrations | 9 |
+| DB Backends | 2 |
+
+## Key Features
+
+<Cards>
+  <Card title="Authentication" href="/docs/api/auth" description="JWT + refresh tokens, Google ID token login, role-based access" />
+  <Card title="Products" href="/docs/api/products" description="CRUD with search, filtering, sorting, Meilisearch-powered" />
+  <Card title="Orders" href="/docs/api/orders" description="Checkout, status transitions, admin management" />
+  <Card title="Architecture" href="/docs/architecture" description="Layered architecture with event-driven pub/sub" />
+</Cards>
+
+## Tech Stack
+
+- **Language**: Go 1.26.3
+- **Database**: Cloudflare D1 (prod) / SQLite (dev)
+- **Search**: Meilisearch
+- **Storage**: Cloudflare R2 (S3-compatible)
+- **Notifications**: WhatsApp Cloud API
+- **Auth**: JWT + Google JWKS
+- **Deploy**: AWS Lambda (arm64)
+
+## Quick Start
+
+```bash
+# Clone and setup
+cp .env.example .env.local
+# Edit .env.local with your credentials
+
+# Start development
+make dev        # export prod DB + start server
+make run        # just start server
+make stop       # kill running server
+```

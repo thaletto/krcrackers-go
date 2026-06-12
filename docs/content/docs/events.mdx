@@ -1,0 +1,56 @@
+---
+title: Event System
+description: In-memory pub/sub bus for cross-service communication.
+icon: Radio
+---
+
+In-memory pub/sub bus decouples services for cross-cutting concerns. Publishers fire events, subscribers handle them asynchronously in goroutines using `context.Background()`.
+
+## Event Flow
+
+```text
+Products Service ──publish──→ eventbus.Bus ──subscribe──→ Search Subscriber (Meilisearch sync)
+                                         ──subscribe──→ Notification Subscriber (WhatsApp)
+Orders Service ───publish──→ eventbus.Bus ──subscribe──→ Search Subscriber
+                                       ──subscribe──→ Notification Subscriber
+```
+
+## Event Types
+
+| Event | Publisher | Subscribers |
+|-------|-----------|-------------|
+| `product.created` | Products service | Search (index to Meilisearch) |
+| `product.updated` | Products service | Search (re-index) |
+| `product.deleted` | Products service | Search (remove from index) |
+| `order.placed` | Orders service | Notifications (WhatsApp) |
+| `order.confirmed` | Orders service | Notifications (WhatsApp) |
+| `order.shipped` | Orders service | Notifications (WhatsApp) |
+| `order.delivered` | Orders service | Notifications (WhatsApp) |
+| `order.cancelled` | Orders service | Notifications (WhatsApp) |
+
+## Order Status State Machine
+
+```text
+pending ──→ confirmed ──→ shipped ──→ delivered
+  │            │            │
+  └──→ cancelled ←──→ cancelled ←──→ cancelled
+```
+
+Each transition publishes an event for notification delivery.
+
+## Usage
+
+```go
+// Publishing
+bus.Publish(ctx, eventbus.Event{
+    Name:    events.ProductCreated,
+    Payload: events.ProductEvent{ID: p.ID, Name: p.Name},
+})
+
+// Subscribing
+bus.Subscribe(events.ProductCreated, func(ctx context.Context, event eventbus.Event) error {
+    payload := event.Payload.(events.ProductEvent)
+    // handle event
+    return nil
+})
+```

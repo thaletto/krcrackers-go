@@ -1,0 +1,71 @@
+---
+title: Deployment
+description: AWS Lambda deployment with Cloudflare D1, performance metrics, and SAM template.
+icon: Cloud
+---
+
+AWS Lambda deployment with Cloudflare D1 backend.
+
+## Architecture
+
+```text
+Client → Function URL → Lambda (ap-south-1) → D1 (via HTTPS)
+```
+
+## Live Endpoint
+
+```
+https://65bstxj4hottbqu3cg6rm4bx2m0qsxcr.lambda-url.ap-south-1.on.aws
+```
+
+## Performance
+
+| Metric | Value |
+|--------|-------|
+| Cold start | ~2s |
+| Warm requests | <500ms |
+| Region | ap-south-1 (Mumbai) |
+| Architecture | arm64 |
+
+## Build and Deploy
+
+```bash
+# Build for Lambda
+GOOS=linux GOARCH=arm64 go build -o bootstrap ./cmd/lambda
+zip lambda.zip bootstrap
+
+# Deploy
+make deploy-lambda
+```
+
+## Create Function
+
+```bash
+aws lambda create-function \
+  --function-name krcrackers \
+  --region ap-south-1 \
+  --runtime provided.al2023 \
+  --architectures arm64 \
+  --handler bootstrap \
+  --zip-file fileb://lambda.zip \
+  --timeout 30 \
+  --memory-size 128
+```
+
+## Migrations
+
+Run separately from Lambda:
+
+```bash
+APP_ENV=production \
+CLOUDFLARE_API_TOKEN=your-token \
+CLOUDFLARE_ACCOUNT_ID=your-account-id \
+CLOUDFLARE_DATABASE_ID=your-db-id \
+./bootstrap migrate up
+```
+
+## Free Tier
+
+- 1M requests/month, 400K GB-seconds
+- Cold starts (~2s) after ~5-15 min of inactivity
+- Skip provisioned concurrency (~$3.50/mo) for low traffic
