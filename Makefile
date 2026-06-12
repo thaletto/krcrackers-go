@@ -5,7 +5,7 @@ AIR        := $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH 2>/de
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda test clean wrangler-login
+.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda test test-endpoints clean wrangler-login
 
 help:                ## Show this help message
 	@echo "Targets:"
@@ -58,6 +58,9 @@ deploy-lambda: build-lambda  ## Deploy to AWS Lambda
 
 test:                ## Run tests
 	go test ./...
+
+test-endpoints:      ## Run endpoint integration tests (starts server, tests all APIs, cleans up)
+	./scripts/test-endpoints.sh
 
 clean:               ## Remove .data/ and .wrangler/
 	rm -rf .data .wrangler
