@@ -1,5 +1,5 @@
 import { createFileRoute, notFound } from '@tanstack/react-router';
-import { DocsLayout } from 'fumadocs-ui/layouts/docs';
+import { DocsLayout } from 'fumadocs-ui/layouts/notebook';
 import { createServerFn } from '@tanstack/react-start';
 import { slugsToMarkdownPath, source } from '@/lib/source';
 import browserCollections from 'collections/browser';
@@ -10,19 +10,23 @@ import {
   DocsTitle,
   MarkdownCopyButton,
   ViewOptionsPopover,
-} from 'fumadocs-ui/layouts/docs/page';
+} from 'fumadocs-ui/layouts/notebook/page';
 import { baseOptions } from '@/lib/layout.shared';
 import { gitConfig } from '@/lib/shared';
 import { useFumadocsLoader } from 'fumadocs-core/source/client';
-import { Suspense } from 'react';
+import { Suspense, type ReactNode } from 'react';
 import { useMDXComponents } from '@/components/mdx';
+import { OpenAPIPage } from '@/components/api-page';
 
 export const Route = createFileRoute('/docs/$')({
   component: Page,
   loader: async ({ params }) => {
     const slugs = params._splat?.split('/') ?? [];
     const data = await serverLoader({ data: slugs });
-    await clientLoader.preload(data.path);
+
+    if (data.type === 'docs') {
+      await clientLoader.preload(data.path);
+    }
     return data;
   },
 });
@@ -30,15 +34,27 @@ export const Route = createFileRoute('/docs/$')({
 const serverLoader = createServerFn({
   method: 'GET',
 })
-  .inputValidator((slugs: string[]) => slugs)
+  .validator((slugs: string[]) => slugs)
   .handler(async ({ data: slugs }) => {
     const page = source.getPage(slugs);
     if (!page) throw notFound();
 
+    const pageTree = await source.serializePageTree(source.getPageTree());
+    if (page.type === 'openapi') {
+      return {
+        type: 'openapi',
+        title: page.data.title,
+        description: page.data.description,
+        pageTree,
+        props: page.data.getOpenAPIPageProps(),
+      };
+    }
+
     return {
+      type: 'docs',
       path: page.path,
       markdownUrl: slugsToMarkdownPath(page.slugs).url,
-      pageTree: await source.serializePageTree(source.getPageTree()),
+      pageTree,
     };
   });
 
@@ -74,11 +90,27 @@ const clientLoader = browserCollections.docs.createClientLoader({
 });
 
 function Page() {
-  const { path, pageTree, markdownUrl } = useFumadocsLoader(Route.useLoaderData());
+  const page = useFumadocsLoader(Route.useLoaderData());
+  let content: ReactNode;
 
+  if (page.type === 'openapi') {
+    content = (
+      <DocsPage full>
+        <DocsTitle>{page.title}</DocsTitle>
+        <DocsDescription>{page.description}</DocsDescription>
+        <DocsBody>
+          <OpenAPIPage {...page.props} />
+        </DocsBody>
+      </DocsPage>
+    );
+  } else {
+    content = <Suspense>{clientLoader.useContent(page.path, page)}</Suspense>;
+  }
+
+  const base = baseOptions();
   return (
-    <DocsLayout {...baseOptions()} tree={pageTree}>
-      <Suspense>{clientLoader.useContent(path, { markdownUrl, path })}</Suspense>
+    <DocsLayout {...base} nav={{ ...base.nav, mode: 'top' }} tree={page.pageTree}>
+      {content}
     </DocsLayout>
   );
 }

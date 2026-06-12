@@ -14,5 +14,5 @@ node_modules
 /blob-report/
 /playwright/.cache/
 .tanstack
-
+dist/
 .source
