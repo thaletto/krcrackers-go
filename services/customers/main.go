@@ -17,6 +17,12 @@ type Service struct {
 	repo Repository
 }
 
+// ListAddressesResponse is the response for listing customer addresses.
+type ListAddressesResponse struct {
+	Items  []Address `json:"items"`
+	Total  int       `json:"total"`
+}
+
 // NewService creates a new customers service.
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
@@ -33,6 +39,16 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("PUT /customers/addresses/{id}/default", auth.WithAuth(http.HandlerFunc(s.setDefaultAddress)).ServeHTTP)
 }
 
+// GetProfile godoc
+// @Summary      Get customer profile
+// @Description  Return the authenticated customer's profile
+// @Tags         customers
+// @Produce      json
+// @Security     cookieAuth
+// @Success      200    {object}  auth.User
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /customers/profile [get]
 func (s *Service) getProfile(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	profile, err := s.repo.GetProfile(r.Context(), user.ID)
@@ -43,6 +59,18 @@ func (s *Service) getProfile(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, profile)
 }
 
+// UpdateProfile godoc
+// @Summary      Update customer profile
+// @Description  Update the authenticated customer's name and phone
+// @Tags         customers
+// @Accept       json
+// @Produce      json
+// @Security     cookieAuth
+// @Param        input  body      object{name:string, phone:string}  true  "Profile update"
+// @Success      200    {object}  auth.User
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Router       /customers/profile [put]
 func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	var input struct {
@@ -62,6 +90,15 @@ func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, profile)
 }
 
+// ListAddresses godoc
+// @Summary      List customer addresses
+// @Description  Return all addresses for the authenticated customer
+// @Tags         customers
+// @Produce      json
+// @Security     cookieAuth
+// @Success      200    {object}  ListAddressesResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Router       /customers/addresses [get]
 func (s *Service) listAddresses(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	addresses, err := s.repo.ListAddresses(r.Context(), user.ID)
@@ -72,6 +109,19 @@ func (s *Service) listAddresses(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, map[string]any{"items": addresses, "total": len(addresses)})
 }
 
+// CreateAddress godoc
+// @Summary      Create a new address
+// @Description  Add a new address for the authenticated customer
+// @Tags         customers
+// @Accept       json
+// @Produce      json
+// @Security     cookieAuth
+// @Param        input  body      AddressInput  true  "Address details"
+// @Success      201    {object}  Address
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /customers/addresses [post]
 func (s *Service) createAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	var input AddressInput
@@ -92,6 +142,19 @@ func (s *Service) createAddress(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusCreated, addr)
 }
 
+// UpdateAddress godoc
+// @Summary      Update an address
+// @Description  Update an existing address for the authenticated customer
+// @Tags         customers
+// @Accept       json
+// @Produce      json
+// @Security     cookieAuth
+// @Param        id     path      int           true  "Address ID"
+// @Param        input  body      AddressInput  true  "Address details"
+// @Success      200    {object}  Address
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Router       /customers/addresses/{id} [put]
 func (s *Service) updateAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	id, err := strconv.Atoi(r.PathValue("id"))
@@ -114,6 +177,17 @@ func (s *Service) updateAddress(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, addr)
 }
 
+// DeleteAddress godoc
+// @Summary      Delete an address
+// @Description  Remove an address for the authenticated customer
+// @Tags         customers
+// @Security     cookieAuth
+// @Param        id   path      int  true  "Address ID"
+// @Success      204
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /customers/addresses/{id} [delete]
 func (s *Service) deleteAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	id, err := strconv.Atoi(r.PathValue("id"))
@@ -133,6 +207,18 @@ func (s *Service) deleteAddress(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// SetDefaultAddress godoc
+// @Summary      Set default address
+// @Description  Mark an address as the default for the authenticated customer
+// @Tags         customers
+// @Produce      json
+// @Security     cookieAuth
+// @Param        id   path      int  true  "Address ID"
+// @Success      200    {object}  server.StatusResponse
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /customers/addresses/{id}/default [put]
 func (s *Service) setDefaultAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	id, err := strconv.Atoi(r.PathValue("id"))

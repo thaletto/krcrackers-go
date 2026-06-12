@@ -72,6 +72,17 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/dashboard", adminAuth(s.adminDashboard))
 }
 
+// Create godoc
+// @Summary      Create an order
+// @Description  Create a new order (admin/direct)
+// @Tags         orders
+// @Accept       json
+// @Produce      json
+// @Param        input  body      OrderInput  true  "Order details"
+// @Success      201    {object}  Order
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /orders [post]
 func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 	var input OrderInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -92,6 +103,16 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusCreated, order)
 }
 
+// List godoc
+// @Summary      List orders
+// @Description  List all orders with pagination (admin)
+// @Tags         orders
+// @Produce      json
+// @Param        limit   query     int  false  "Page limit"
+// @Param        offset  query     int  false  "Page offset"
+// @Success      200    {object}  ListOrdersResponse
+// @Failure      500    {object}  server.ErrorResponse
+// @Router       /orders [get]
 func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	limit, _ := strconv.Atoi(q.Get("limit"))
@@ -106,6 +127,16 @@ func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, resp)
 }
 
+// Get godoc
+// @Summary      Get an order
+// @Description  Get a single order by ID
+// @Tags         orders
+// @Produce      json
+// @Param        id   path      int  true  "Order ID"
+// @Success      200    {object}  Order
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /orders/{id} [get]
 func (s *Service) get(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -126,6 +157,19 @@ func (s *Service) get(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, order)
 }
 
+// Update godoc
+// @Summary      Update an order
+// @Description  Update an existing order by ID
+// @Tags         orders
+// @Accept       json
+// @Produce      json
+// @Param        id     path      int          true  "Order ID"
+// @Param        input  body      OrderInput  true  "Order details"
+// @Success      200    {object}  Order
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /orders/{id} [put]
 func (s *Service) update(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -156,6 +200,15 @@ func (s *Service) update(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, order)
 }
 
+// Delete godoc
+// @Summary      Delete an order
+// @Description  Delete an order by ID
+// @Tags         orders
+// @Param        id   path      int  true  "Order ID"
+// @Success      204
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /orders/{id} [delete]
 func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -175,6 +228,22 @@ func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Checkout godoc
+// @Summary      Checkout
+// @Description  Place an order with address, items, and optional payment screenshot
+// @Tags         orders
+// @Accept       multipart/form-data
+// @Produce      json
+// @Security     cookieAuth
+// @Param        address_id          formData  int     true   "Address ID"
+// @Param        items               formData  string  true   "JSON array of checkout items"
+// @Param        payment_screenshot   formData  file    false  "Payment screenshot"
+// @Param        payment_reference   formData  string  false  "Payment reference"
+// @Success      201    {object}  Order
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /orders/checkout [post]
 func (s *Service) checkout(w http.ResponseWriter, r *http.Request) {
 	if err := r.ParseMultipartForm(32 << 20); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid multipart form")
@@ -282,6 +351,17 @@ func (s *Service) checkout(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusCreated, order)
 }
 
+// ListMyOrders godoc
+// @Summary      List my orders
+// @Description  List orders for the authenticated customer
+// @Tags         orders
+// @Produce      json
+// @Security     cookieAuth
+// @Param        limit   query     int  false  "Page limit"
+// @Param        offset  query     int  false  "Page offset"
+// @Success      200    {object}  ListOrdersResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Router       /orders/my [get]
 func (s *Service) listMyOrders(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	q := r.URL.Query()
@@ -297,6 +377,18 @@ func (s *Service) listMyOrders(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, resp)
 }
 
+// GetMyOrder godoc
+// @Summary      Get my order
+// @Description  Get a single order for the authenticated customer
+// @Tags         orders
+// @Produce      json
+// @Security     cookieAuth
+// @Param        id   path      int  true  "Order ID"
+// @Success      200    {object}  Order
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /orders/my/{id} [get]
 func (s *Service) getMyOrder(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	id, err := strconv.Atoi(r.PathValue("id"))
@@ -318,6 +410,19 @@ func (s *Service) getMyOrder(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, order)
 }
 
+// CancelMyOrder godoc
+// @Summary      Cancel my order
+// @Description  Cancel a pending order for the authenticated customer
+// @Tags         orders
+// @Produce      json
+// @Security     cookieAuth
+// @Param        id   path      int  true  "Order ID"
+// @Success      200    {object}  Order
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /orders/my/{id} [delete]
 func (s *Service) cancelMyOrder(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	id, err := strconv.Atoi(r.PathValue("id"))
@@ -352,6 +457,19 @@ func (s *Service) cancelMyOrder(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, updated)
 }
 
+// AdminListOrders godoc
+// @Summary      List all orders
+// @Description  List all orders with optional status filter (admin)
+// @Tags         admin
+// @Produce      json
+// @Security     cookieAuth
+// @Param        status  query     string  false  "Filter by status"
+// @Param        limit   query     int     false  "Page limit"
+// @Param        offset  query     int     false  "Page offset"
+// @Success      200    {object}  ListOrdersResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      403    {object}  server.ErrorResponse
+// @Router       /admin/orders [get]
 func (s *Service) adminListOrders(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	status := q.Get("status")
@@ -367,6 +485,19 @@ func (s *Service) adminListOrders(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, resp)
 }
 
+// AdminGetOrder godoc
+// @Summary      Get order details
+// @Description  Get a single order by ID (admin)
+// @Tags         admin
+// @Produce      json
+// @Security     cookieAuth
+// @Param        id   path      int  true  "Order ID"
+// @Success      200    {object}  Order
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      403    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /admin/orders/{id} [get]
 func (s *Service) adminGetOrder(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -387,6 +518,20 @@ func (s *Service) adminGetOrder(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, order)
 }
 
+// AdminUpdateStatus godoc
+// @Summary      Update order status
+// @Description  Update the status of an order (admin)
+// @Tags         admin
+// @Accept       json
+// @Produce      json
+// @Security     cookieAuth
+// @Param        id     path      int                    true  "Order ID"
+// @Param        input  body      object{status:string}  true  "New status"
+// @Success      200    {object}  Order
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      403    {object}  server.ErrorResponse
+// @Router       /admin/orders/{id}/status [patch]
 func (s *Service) adminUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -427,6 +572,16 @@ func (s *Service) adminUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, order)
 }
 
+// AdminDashboard godoc
+// @Summary      Dashboard stats
+// @Description  Get dashboard statistics (admin)
+// @Tags         admin
+// @Produce      json
+// @Security     cookieAuth
+// @Success      200    {object}  DashboardStats
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      403    {object}  server.ErrorResponse
+// @Router       /admin/dashboard [get]
 func (s *Service) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	stats, err := s.repo.GetDashboardStats(r.Context())
 	if err != nil {

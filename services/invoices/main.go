@@ -65,6 +65,17 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /admin/invoices/{id}", auth.WithAuth(auth.WithAdmin(http.HandlerFunc(s.getAdminInvoice))).ServeHTTP)
 }
 
+// GetCustomerInvoice godoc
+// @Summary      Get invoice PDF
+// @Description  Download a PDF invoice for an order
+// @Tags         invoices
+// @Produce      application/pdf
+// @Security     cookieAuth
+// @Param        id   path      int  true  "Order ID"
+// @Success      200  {file}    binary
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /invoices/{id} [get]
 func (s *Service) getCustomerInvoice(w http.ResponseWriter, r *http.Request) {
 	id, err := parseID(r)
 	if err != nil {
@@ -98,6 +109,18 @@ func (s *Service) getCustomerInvoice(w http.ResponseWriter, r *http.Request) {
 	w.Write(pdf)
 }
 
+// GetAdminInvoice godoc
+// @Summary      Get invoice PDF (admin)
+// @Description  Download a PDF invoice for an order (admin)
+// @Tags         admin
+// @Produce      application/pdf
+// @Security     cookieAuth
+// @Param        id   path      int  true  "Order ID"
+// @Success      200  {file}    binary
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      403    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /admin/invoices/{id} [get]
 func (s *Service) getAdminInvoice(w http.ResponseWriter, r *http.Request) {
 	s.getCustomerInvoice(w, r)
 }

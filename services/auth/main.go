@@ -36,6 +36,18 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /auth/me", WithAuth(http.HandlerFunc(s.me)).ServeHTTP)
 }
 
+// Register godoc
+// @Summary      Register a new user
+// @Description  Create a new user account with email and password
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        input  body      object{email:string, password:string, name:string, phone:string}  true  "Registration details"
+// @Success      201    {object}  authResponse
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      409    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /auth/register [post]
 func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Email    string `json:"email"`
@@ -91,6 +103,18 @@ func (s *Service) register(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusCreated, authResponse{User: user})
 }
 
+// Login godoc
+// @Summary      Log in with email and password
+// @Description  Authenticate with email and password, sets JWT cookies
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        input  body      object{email:string, password:string}  true  "Login credentials"
+// @Success      200    {object}  authResponse
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /auth/login [post]
 func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Email    string `json:"email"`
@@ -137,6 +161,18 @@ func (s *Service) login(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, authResponse{User: user})
 }
 
+// GoogleLogin godoc
+// @Summary      Log in with Google
+// @Description  Authenticate using a Google ID token, auto-creates account if new
+// @Tags         auth
+// @Accept       json
+// @Produce      json
+// @Param        input  body      object{idToken:string}  true  "Google ID token"
+// @Success      200    {object}  authResponse
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /auth/google [post]
 func (s *Service) googleLogin(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		IDToken string `json:"idToken"`
@@ -191,6 +227,14 @@ func (s *Service) googleLogin(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, authResponse{User: user})
 }
 
+// Refresh godoc
+// @Summary      Refresh access token
+// @Description  Rotate refresh token and issue new access token
+// @Tags         auth
+// @Produce      json
+// @Success      200    {object}  authResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Router       /auth/refresh [post]
 func (s *Service) refresh(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := r.Cookie("refresh_token")
 	if err != nil || refreshToken.Value == "" {
@@ -240,6 +284,12 @@ func (s *Service) refresh(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, authResponse{User: user})
 }
 
+// Logout godoc
+// @Summary      Log out
+// @Description  Revoke refresh token and clear cookies
+// @Tags         auth
+// @Success      204
+// @Router       /auth/logout [post]
 func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	refreshToken, err := r.Cookie("refresh_token")
 	if err == nil && refreshToken.Value != "" {
@@ -251,6 +301,16 @@ func (s *Service) logout(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// Me godoc
+// @Summary      Get current user
+// @Description  Return the authenticated user's profile
+// @Tags         auth
+// @Produce      json
+// @Security     cookieAuth
+// @Success      200    {object}  User
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Router       /auth/me [get]
 func (s *Service) me(w http.ResponseWriter, r *http.Request) {
 	user := GetUser(r)
 	if user == nil {

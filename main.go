@@ -26,6 +26,14 @@ import (
 	"github.com/thaletto/krcrackers-go/services/uploads"
 )
 
+// @title           KR Crackers API
+// @version         1.0
+// @description     E-commerce backend for KR Crackers with order management, product catalog, and admin dashboard.
+// @host            localhost:8080
+// @BasePath        /
+// @securityDefinitions.apikey cookieAuth
+// @in cookie
+// @name access_token
 func main() {
 	if len(os.Args) >= 2 && os.Args[1] == "migrate" {
 		if err := runMigrate(os.Args[2:]); err != nil {
