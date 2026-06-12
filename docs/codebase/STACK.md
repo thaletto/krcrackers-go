@@ -1,38 +1,41 @@
 # Technology Stack
 
-## Core Sections (Required)
+## Runtime
 
-### 1) Runtime Summary
+| Area | Value |
+|------|-------|
+| Primary language | Go |
+| Runtime + version | Go 1.26.3 |
+| Package manager | Go modules |
+| Module/build system | `go build` via Makefile |
 
-| Area | Value | Evidence |
-|------|-------|----------|
-| Primary language | Go | `go.mod` |
-| Runtime + version | Go 1.26.3 | `go.mod:3` |
-| Package manager | Go modules | `go.mod`, `go.sum` |
-| Module/build system | `go build` via Makefile | `Makefile:47` |
+## Production Dependencies
 
-### 2) Production Frameworks and Dependencies
+| Dependency | Version | Role |
+|------------|---------|------|
+| `net/http` (stdlib) | — | HTTP server, routing (Go 1.22+ pattern matching) |
+| `cloudflare/cloudflare-go/v7` | v7.4.0 | Cloudflare D1 HTTP API client |
+| `modernc.org/sqlite` | v1.51.0 | Pure-Go SQLite driver (no CGo) |
+| `pressly/goose/v3` | v3.27.1 | Migration version parser |
+| `joho/godotenv` | v1.5.1 | `.env` / `.env.local` file loading |
+| `golang-jwt/jwt/v5` | — | JWT generation and validation |
+| `golang.org/x/crypto` | — | bcrypt password hashing |
+| `meilisearch/meilisearch-go` | v0.36.3 | Meilisearch client |
+| `aws/aws-sdk-go-v2` | — | S3-compatible R2 file uploads |
+| `jung-kurt/gofpdf` | — | PDF invoice generation |
+| `aws/aws-lambda-go` | v1.54.0 | AWS Lambda runtime (secondary) |
+| `awslabs/aws-lambda-go-api-proxy` | v0.16.2 | Lambda API Gateway adapter |
 
-| Dependency | Version | Role in system | Evidence |
-|------------|---------|----------------|----------|
-| `net/http` (stdlib) | — | HTTP server, routing (Go 1.22+ pattern matching) | `main.go:116`, `Makefile:23` |
-| `cloudflare/cloudflare-go/v7` | v7.4.0 | Cloudflare D1 HTTP API client | `database/d1.go:9` |
-| `modernc.org/sqlite` | v1.51.0 | Pure-Go SQLite driver (no CGo) | `database/sqlite.go:11` |
-| `pressly/goose/v3` | v3.27.1 | Migration version parser (`NumericComponent`) | `migrations/migrations.go:37` |
-| `joho/godotenv` | v1.5.1 | `.env` / `.env.local` file loading | `config/config.go:8` |
-| `aws/aws-lambda-go` | v1.54.0 | AWS Lambda runtime (secondary entry point) | `cmd/lambda/main.go:8` |
-| `awslabs/aws-lambda-go-api-proxy` | v0.16.2 | Adapts `net/http` handler to Lambda API Gateway v2 | `cmd/lambda/main.go:9` |
+## Development Toolchain
 
-### 3) Development Toolchain
+| Tool | Purpose |
+|------|---------|
+| `make` | Build/dev task runner |
+| `air` (air-verse/air) | Hot reload on `.go` changes |
+| `wrangler` | Cloudflare D1 data export (prod→dev) |
+| `sqlite3` CLI | Load dumped SQL into local dev DB |
 
-| Tool | Purpose | Evidence |
-|------|---------|----------|
-| `make` | Build/dev task runner | `Makefile` |
-| `air` (air-verse/air) | Hot reload on `.go` changes | `Makefile:30`, `.air.toml` |
-| `wrangler` | Cloudflare D1 data export (prod→dev) | `Makefile:16` |
-| `sqlite3` CLI | Load dumped SQL into local dev DB | `Makefile:19` |
-
-### 4) Key Commands
+## Key Commands
 
 ```bash
 make dev              # export prod D1 → local SQLite, start dev server
@@ -41,6 +44,7 @@ make stop             # kill dev server (frees :8080)
 make watch            # hot reload (requires air)
 make build            # go build ./...
 make test             # go test ./... (no test files exist yet)
+make test-endpoints   # run 64 endpoint integration tests
 make migrate-up       # apply pending migrations
 make migrate-down     # rollback latest migration
 make migrate-status   # show applied/pending migrations
@@ -48,25 +52,8 @@ make build-lambda     # cross-compile for linux/arm64 Lambda
 make deploy-lambda    # push binary to AWS Lambda
 ```
 
-### 5) Environment and Config
+## Environment Config
 
 - Config sources: `.env` (shared defaults), `.env.local` (personal overrides, gitignored)
-- Required env vars:
-  - `APP_ENV` — `development` (default) or `production`
-  - `LOCAL_DB_PATH` — SQLite file path, default `.data/dev.sqlite`
-  - `CLOUDFLARE_API_TOKEN` — D1 API token (production only)
-  - `CLOUDFLARE_ACCOUNT_ID` — Cloudflare account ID (production only)
-  - `CLOUDFLARE_DATABASE_ID` — D1 database ID (default `735027ae-2327-4561-8e62-538973817b06`)
-  - `PORT` — HTTP port, default `8080`
-- Deployment/runtime constraints: Go binary, no CGo (pure-Go SQLite via `modernc.org/sqlite`), cross-compilable to `linux/arm64` for Lambda
-
-### 6) Evidence
-
-- `go.mod` — module definition and all dependencies
-- `Makefile` — all build/dev/deploy commands
-- `.air.toml` — hot reload configuration
-- `.env.example` — config template with all env vars
-
-## Extended Sections (Optional)
-
-Not needed for this small project.
+- `APP_ENV` defaults to `"development"` unless `CLOUDFLARE_API_TOKEN` is set
+- `JWT_SECRET` is required; server panics at startup if empty

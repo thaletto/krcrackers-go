@@ -9,9 +9,15 @@ make test    # go test ./... - always passes (no test files exist yet)
 
 Run `make stop` before `make run` if you suspect a prior server is still bound to `:8080`.
 
+## Endpoint integration tests
+
+```sh
+make test-endpoints   # starts server, runs 64 endpoint tests, cleans up
+```
+
 ## Pagination convention
 
-`limit` and `offset` on `GET /products` are optional `int` query params. A value of `0` (the zero value) means "omitted" - omitting `limit` returns all rows with no `LIMIT` clause. The response wraps items and echoes back the params as nullable pointers:
+`limit` and `offset` on list endpoints are optional `int` query params. A value of `0` (the zero value) means "omitted" - omitting `limit` returns all rows with no `LIMIT` clause. The response wraps items and echoes back the params as nullable pointers:
 
 ```json
 {
@@ -23,6 +29,16 @@ Run `make stop` before `make run` if you suspect a prior server is still bound t
 ```
 
 When the client omits `limit`, `limit` and `offset` are omitted from the response (`omitempty`).
+
+## Authentication
+
+JWT + refresh tokens in HttpOnly cookies. No tokens in response body.
+
+- `access_token` cookie: 15-minute expiry, signed with `JWT_SECRET`
+- `refresh_token` cookie: 7-day expiry, stored in `refresh_tokens` table
+- Google login: frontend sends ID token via `POST /auth/google`, backend validates via JWKS (cached 6h)
+
+Middleware: `WithAuth` (required), `WithAdmin` (admin role check), `WithOptionalAuth` (attaches user if present).
 
 ## Database seam
 
@@ -75,6 +91,27 @@ func (s *Service) handler(w http.ResponseWriter, r *http.Request) { ... }
 
 Handler wiring lives in `main.go` and `cmd/lambda/main.go`. The `server` package provides shared HTTP helpers (`WriteJSON`, `WriteError`, `WithLogging`) used by both entry points and services.
 
+## Event bus
+
+In-memory pub/sub via `eventbus.Bus`. Publishers fire events, subscribers handle them asynchronously (goroutines with `context.Background()`).
+
+Events: `product.created`, `product.updated`, `product.deleted`, `order.placed`, `order.confirmed`, `order.shipped`, `order.delivered`, `order.cancelled`.
+
+Subscribers: search (Meilisearch sync), notifications (WhatsApp).
+
+## Services
+
+| Service | Package | Auth | Description |
+|---------|---------|------|-------------|
+| Auth | `services/auth/` | Public + middleware | Register, login, Google login, refresh, logout, /me |
+| Customers | `services/customers/` | WithAuth | Profile CRUD, address CRUD with set-default |
+| Products | `services/products/` | Public reads, admin writes | CRUD, search/filter/sort, event publishing |
+| Orders | `services/orders/` | Public + auth + admin | Checkout, customer orders, admin management, dashboard |
+| Search | `services/search/` | None (internal) | Meilisearch sync via event subscriber |
+| Uploads | `services/uploads/` | None (internal) | R2 file uploads for payment screenshots |
+| Notifications | `services/notifications/` | None (internal) | WhatsApp Cloud API via event subscriber |
+| Invoices | `services/invoices/` | WithAuth | On-demand PDF invoice generation |
+
 ## Migrations
 
 The server does **not** auto-migrate on boot. Run explicitly:
@@ -103,4 +140,8 @@ Use `go doc` to look up types, functions, and packages - it's faster and more re
 go doc database.DB            # interface
 go doc database.Row           # typed row accessor
 go doc products.Product       # response struct
+go doc eventbus.Bus           # event bus interface
+go doc auth.WithAuth          # auth middleware
 ```
+
+HTML docs: open `docs/index.html` in a browser.

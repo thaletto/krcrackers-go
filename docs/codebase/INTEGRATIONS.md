@@ -1,50 +1,46 @@
 # External Integrations
 
-## Core Sections (Required)
+## Integration Inventory
 
-### 1) Integration Inventory
+| System | Type | Purpose | Auth model | Criticality |
+|--------|------|---------|------------|-------------|
+| Cloudflare D1 | Database (HTTP API) | Production database | API token | High |
+| Cloudflare R2 | Object storage | Payment screenshots, file uploads | Access key + secret key | Medium |
+| Meilisearch | Search engine | Product full-text search with typo-tolerance | API key | Medium |
+| WhatsApp Cloud API | Messaging | Order lifecycle notifications | API token | Low |
+| Google JWKS | Identity | ID token validation for Google login | Public keys (cached 6h) | High |
+| AWS Lambda | Compute | Serverless deployment target (secondary) | IAM role | Low |
 
-| System | Type | Purpose | Auth model | Criticality | Evidence |
-|--------|------|---------|------------|-------------|----------|
-| Cloudflare D1 | Database (HTTP API) | Production database via REST | API token (`CLOUDFLARE_API_TOKEN`) | High | `database/d1.go` |
-| AWS Lambda | Compute | Serverless deployment target | IAM role (implicit) | Medium | `cmd/lambda/main.go` |
-| AWS API Gateway v2 | API Gateway | HTTP frontend for Lambda | IAM role (implicit) | Medium | `cmd/lambda/main.go:10` |
+## Data Stores
 
-### 2) Data Stores
+| Store | Role | Access layer | Key risk |
+|-------|------|--------------|----------|
+| Cloudflare D1 | Production database | `database/d1.go` (HTTP API) | Best-effort transactions not atomic |
+| Local SQLite | Development database | `database/sqlite.go` (pure-Go) | WAL mode; foreign keys enabled |
+| Cloudflare R2 | File storage | `services/uploads/main.go` (S3 API) | No retry logic |
+| Meilisearch | Search index | `services/search/main.go` | No retry logic |
 
-| Store | Role | Access layer | Key risk | Evidence |
-|-------|------|--------------|----------|----------|
-| Cloudflare D1 (`krcrackers-products`) | Production database | `database/d1.go` (HTTP API via `cloudflare-go/v7`) | Best-effort transactions not atomic | `database/d1.go:84-136` |
-| Local SQLite (`.data/dev.sqlite`) | Development database | `database/sqlite.go` (pure-Go `modernc.org/sqlite`) | WAL mode; foreign keys enabled | `database/sqlite.go:25` |
+## Secrets and Credentials
 
-### 3) Secrets and Credentials Handling
+All credentials are loaded from environment variables via `godotenv`:
 
-- Credential sources: Environment variables loaded via `godotenv` from `.env` (shared) and `.env.local` (personal, gitignored)
-- Hardcoding checks: No hardcoded secrets found; all credentials read from env vars via `os.Getenv`
-- Rotation or lifecycle notes: [TODO] — No rotation mechanism; manual `.env` update
+| Variable | Purpose | Required |
+|----------|---------|----------|
+| `JWT_SECRET` | HMAC signing key for JWT tokens | Yes (panics if empty) |
+| `CLOUDFLARE_API_TOKEN` | D1 API token (production) | Production only |
+| `CLOUDFLARE_ACCOUNT_ID` | Cloudflare account ID | Production only |
+| `CLOUDFLARE_DATABASE_ID` | D1 database ID | Production only |
+| `R2_ACCESS_KEY_ID` | R2 access key | For file uploads |
+| `R2_SECRET_ACCESS_KEY` | R2 secret key | For file uploads |
+| `R2_BUCKET_NAME` | R2 bucket name | For file uploads |
+| `MEILISEARCH_API_KEY` | Meilisearch API key | For search |
+| `WHATSAPP_API_TOKEN` | WhatsApp Cloud API token | For notifications |
 
-### 4) Reliability and Failure Behavior
+No hardcoded secrets found. `.env.local` is gitignored for personal overrides.
 
-- Retry/backoff behavior: [TODO] — No retry logic implemented for D1 HTTP API calls
-- Timeout policy: `ReadHeaderTimeout: 10s` on HTTP server (`main.go:93`); migration timeout `5m` (`main.go:53`); Lambda timeout `30s` (`docs/deployment.md`); no D1 HTTP client timeout configured
-- Circuit-breaker or fallback behavior: None
-- Lambda live endpoint: `https://65bstxj4hottbqu3cg6rm4bx2m0qsxcr.lambda-url.ap-south-1.on.aws` (ap-south-1, arm64, ~2s cold start, <500ms warm)
+## Reliability
 
-### 5) Observability for Integrations
-
-- Logging around external calls: Minimal — request logging via `server.WithLogging` (method, path, status, duration) at `server/server.go:25`. D1 API calls have no logging.
-- Metrics/tracing coverage: None
-- Missing visibility gaps: No D1 API call latency/error logging, no request ID tracking, no structured logging
-
-### 6) Evidence
-
-- `database/d1.go` — D1 HTTP API client implementation
-- `database/sqlite.go` — SQLite local adapter
-- `cmd/lambda/main.go` — Lambda integration with `go-api-proxy`
-- `config/config.go` — credential loading from env vars
-- `server/server.go:20-27` — request logging middleware
-- `docs/deployment.md` — Lambda deployment details, live endpoint
-
-## Extended Sections (Optional)
-
-Not needed for this small project.
+- **Timeouts**: HTTP server `ReadHeaderTimeout: 10s`, JWKS fetch `10s`, WhatsApp API `10s`
+- **Retry/backoff**: None implemented for external calls
+- **Circuit breaker**: None
+- **Graceful shutdown**: 10s timeout on SIGTERM/SIGINT

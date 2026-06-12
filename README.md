@@ -1,6 +1,6 @@
 # KR Crackers Go Backend
 
-A small Go HTTP API for KR Crackers. Backed by Cloudflare D1 in production, local SQLite in development.
+A Go HTTP API for KR Crackers e-commerce. Customer-facing order lifecycle, product catalog with search, payment proof uploads, PDF invoices, and WhatsApp notifications.
 
 ## Quick start
 
@@ -23,11 +23,13 @@ make migrate-down     # roll back the most recent migration
 make migrate-status   # show applied and pending migrations
 make build            # go build ./...
 make test             # go test ./...
+make test-endpoints   # run 64 endpoint integration tests
 make clean            # rm -rf .data .wrangler
 ```
 
 ## Docs
 
-- [API](docs/api.md)
+- [API Reference](docs/api.md)
+- [HTML Documentation](docs/index.html) — open in browser for full visual docs
 - [Deployment](docs/deployment.md)
-- [Codebase overview](docs/codebase/)
+- [Codebase Overview](docs/codebase/)

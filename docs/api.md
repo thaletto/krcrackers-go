@@ -1,49 +1,124 @@
 # API
 
-All endpoints return JSON. Errors use a simple `{"error": "message"}` format.
+All endpoints return JSON. Errors use `{"error": "message"}` format.
 
-| Method | Path | Body | Returns |
-|---|---|---|---|
-| `POST` | `/products` | `ProductInput` | `201` + `Product` |
-| `GET` | `/products` | None | `200` + `ListProductsResponse` |
-| `GET` | `/products/{id}` | None | `200` + `Product`, `404` if missing |
-| `PUT` | `/products/{id}` | `ProductInput` | `200` + `Product`, `404` if missing |
-| `DELETE` | `/products/{id}` | None | `204`, `404` if missing |
-| `POST` | `/orders` | `OrderInput` | `201` + `Order` |
-| `GET` | `/orders` | None | `200` + `ListOrdersResponse` |
-| `GET` | `/orders/{id}` | None | `200` + `Order`, `404` if missing |
-| `PUT` | `/orders/{id}` | `OrderInput` | `200` + `Order`, `404` if missing |
-| `DELETE` | `/orders/{id}` | None | `204`, `404` if missing |
-| `GET` | `/health` | None | `200` + `{"status":200,"message":"ok"}` |
+## Authentication
 
-## Schema
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/auth/register` | Public | Register with email/password |
+| `POST` | `/auth/login` | Public | Login with email/password |
+| `POST` | `/auth/google` | Public | Login with Google ID token |
+| `POST` | `/auth/refresh` | Public | Refresh access token |
+| `POST` | `/auth/logout` | Public | Clear tokens |
+| `GET` | `/auth/me` | WithAuth | Get current user |
 
-`ProductInput` (request body): `name`, `price`, `category`, `comparePrice` are required; `brand`, `description`, `image` are optional and nullable.
+## Customers
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/customers/profile` | WithAuth | Get profile |
+| `PUT` | `/customers/profile` | WithAuth | Update profile |
+| `GET` | `/customers/addresses` | WithAuth | List addresses |
+| `POST` | `/customers/addresses` | WithAuth | Create address |
+| `PUT` | `/customers/addresses/{id}` | WithAuth | Update address |
+| `DELETE` | `/customers/addresses/{id}` | WithAuth | Delete address |
+| `PUT` | `/customers/addresses/{id}/default` | WithAuth | Set default address |
+
+## Products
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/products` | Public | List/search products |
+| `GET` | `/products/{id}` | Public | Get product |
+| `POST` | `/admin/products` | Admin | Create product |
+| `PUT` | `/admin/products/{id}` | Admin | Update product |
+| `DELETE` | `/admin/products/{id}` | Admin | Delete product |
+
+## Orders
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `POST` | `/orders` | Public | Create order (legacy) |
+| `GET` | `/orders` | Public | List orders (legacy) |
+| `GET` | `/orders/{id}` | Public | Get order (legacy) |
+| `PUT` | `/orders/{id}` | Public | Update order (legacy) |
+| `DELETE` | `/orders/{id}` | Public | Delete order (legacy) |
+| `POST` | `/orders/checkout` | WithAuth | Checkout with address + screenshot |
+| `GET` | `/orders/my` | WithAuth | List my orders |
+| `GET` | `/orders/my/{id}` | WithAuth | Get my order |
+| `DELETE` | `/orders/my/{id}` | WithAuth | Cancel my order (pending only) |
+| `GET` | `/admin/orders` | Admin | List all orders (filterable) |
+| `GET` | `/admin/orders/{id}` | Admin | Get order details |
+| `PATCH` | `/admin/orders/{id}/status` | Admin | Update order status |
+| `GET` | `/admin/dashboard` | Admin | Dashboard stats |
+
+## Invoices
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/invoices/{id}` | WithAuth | Download PDF invoice |
+| `GET` | `/admin/invoices/{id}` | Admin | Download PDF invoice (admin) |
+
+## Health
+
+| Method | Path | Auth | Description |
+|--------|------|------|-------------|
+| `GET` | `/health` | Public | Health check |
+
+## Query Parameters
+
+### GET /products
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `q` | string | Full-text search query |
+| `category` | string | Filter by category |
+| `brand` | string | Filter by brand |
+| `min_price` | float | Minimum price |
+| `max_price` | float | Maximum price |
+| `sort` | string | `price_asc`, `price_desc`, or `newest` |
+| `limit` | int | Max items (omit for all) |
+| `offset` | int | Skip N items |
+
+### GET /admin/orders
+
+| Param | Type | Description |
+|-------|------|-------------|
+| `status` | string | Filter by status |
+| `limit` | int | Max items |
+| `offset` | int | Skip N items |
+
+## Order Status Transitions
+
+```
+pending → confirmed → shipped → delivered
+   └→ cancelled   └→ cancelled   └→ cancelled
+```
+
+## Pagination Response
 
 ```json
 {
-  "name": "Sneaker",
-  "price": 99,
-  "category": "footwear",
-  "comparePrice": 129,
-  "brand": "Acme",
-  "description": "Shoes",
-  "image": "/s.png"
+  "items": [...],
+  "total": 42,
+  "limit": 20,
+  "offset": 0
 }
 ```
 
-`Product` (response) adds the server-assigned `id`.
+When `limit` is omitted, `limit` and `offset` are omitted from the response.
 
-## Pagination
+## Checkout (multipart/form-data)
 
-`GET /products` and `GET /orders` accept optional `limit` and `offset` query params. Omitting `limit` returns all rows. The response includes the total count and echoes back the params (omitted when not provided).
+| Field | Type | Required |
+|-------|------|----------|
+| `address_id` | int | Yes |
+| `items` | JSON string | Yes |
+| `payment_screenshot` | file | No |
+| `payment_reference` | string | No |
 
-## Validation
-
-Required fields are validated on create/update. Missing or invalid fields return `422`:
-
+Items JSON format:
 ```json
-{
-  "error": "name is required"
-}
+[{"productId": 1, "productName": "Item", "price": 100, "quantity": 2}]
 ```
