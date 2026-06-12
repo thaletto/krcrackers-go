@@ -1,3 +1,6 @@
+// Package auth provides authentication and authorization services including
+// email/password registration, Google ID token validation, JWT-based access
+// tokens, refresh token rotation, and HTTP middleware for protected routes.
 package auth
 
 import (
@@ -8,11 +11,13 @@ import (
 	"github.com/thaletto/krcrackers-go/server"
 )
 
+// Service handles authentication HTTP endpoints and token management.
 type Service struct {
 	repo     Repository
 	isSecure bool
 }
 
+// NewService creates a new auth service. Panics if jwtSecret is empty.
 func NewService(repo Repository, jwtSecret string, isSecure bool) *Service {
 	if jwtSecret == "" {
 		panic("auth: JWT_SECRET is required")
@@ -21,6 +26,7 @@ func NewService(repo Repository, jwtSecret string, isSecure bool) *Service {
 	return &Service{repo: repo, isSecure: isSecure}
 }
 
+// RegisterRoutes registers all authentication endpoints on the given mux.
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /auth/register", s.register)
 	mux.HandleFunc("POST /auth/login", s.login)

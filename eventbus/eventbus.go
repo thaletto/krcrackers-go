@@ -1,3 +1,6 @@
+// Package eventbus provides an in-memory publish-subscribe event system
+// for decoupled inter-service communication. Handlers are invoked
+// asynchronously via goroutines using context.Background().
 package eventbus
 
 import (
@@ -6,13 +9,17 @@ import (
 	"sync"
 )
 
+// Event represents a named event with an arbitrary payload.
 type Event struct {
 	Name    string
 	Payload any
 }
 
+// Handler is a function that processes an event. It receives a context
+// (always context.Background()) and the event to handle.
 type Handler func(ctx context.Context, event Event) error
 
+// Bus defines the interface for publishing and subscribing to events.
 type Bus interface {
 	Publish(ctx context.Context, event Event) error
 	Subscribe(eventName string, handler Handler)
@@ -23,6 +30,7 @@ type memoryBus struct {
 	handlers map[string][]Handler
 }
 
+// New returns a new in-memory event bus.
 func New() Bus {
 	return &memoryBus{
 		handlers: make(map[string][]Handler),

@@ -1,3 +1,6 @@
+// Package uploads provides file upload services backed by Cloudflare R2
+// (S3-compatible object storage). Used for payment screenshots and other
+// customer-uploaded files.
 package uploads
 
 import (
@@ -12,6 +15,7 @@ import (
 	"github.com/aws/aws-sdk-go-v2/service/s3"
 )
 
+// Service defines the interface for file upload operations.
 type Service interface {
 	Put(ctx context.Context, key string, body io.Reader, contentType string) (string, error)
 	Delete(ctx context.Context, key string) error
@@ -24,6 +28,7 @@ type service struct {
 	publicURLBase string
 }
 
+// NewService creates an R2-backed upload service using the given credentials.
 func NewService(accountID, accessKeyID, secretKey, bucket, publicURLBase string) (Service, error) {
 	endpointURL := fmt.Sprintf("https://%s.r2.cloudflarestorage.com", accountID)
 
@@ -73,6 +78,7 @@ func (s *service) URL(key string) string {
 	return fmt.Sprintf("https://pub-%s.r2.dev/%s", s.bucket, key)
 }
 
+// GenerateKey creates a unique object key with a prefix and nanosecond timestamp.
 func GenerateKey(prefix, filename string) string {
 	return fmt.Sprintf("%s/%d_%s", prefix, time.Now().UnixNano(), filename)
 }

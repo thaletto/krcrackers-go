@@ -1,3 +1,6 @@
+// Package config handles application configuration loaded from environment
+// variables and .env files. It supports both local (SQLite) and production
+// (Cloudflare D1) database modes.
 package config
 
 import (
@@ -9,6 +12,7 @@ import (
 	"github.com/thaletto/krcrackers-go/database"
 )
 
+// Config holds all application configuration values.
 type Config struct {
 	Database     database.Config
 	Port         string
@@ -42,6 +46,8 @@ type WhatsAppConfig struct {
 	FromNumber   string
 }
 
+// Load reads configuration from .env and .env.local files, then selects
+// the database backend based on APP_ENV (defaults to "development").
 func Load() (*Config, error) {
 	if err := godotenv.Load(".env"); err != nil && !os.IsNotExist(err) {
 		return nil, fmt.Errorf("loading .env: %w", err)

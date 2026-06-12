@@ -1,3 +1,6 @@
+// Package products provides product catalog management endpoints with
+// search, filtering, and sorting. Admin routes require admin role.
+// Product changes are published to the event bus for search index sync.
 package products
 
 import (
@@ -15,6 +18,7 @@ import (
 	"github.com/thaletto/krcrackers-go/services/auth"
 )
 
+// Service handles product HTTP endpoints and event publishing.
 type Service struct {
 	repo Repository
 	bus  eventbus.Bus
@@ -46,10 +50,13 @@ type ListProductsResponse struct {
 	Offset *int      `json:"offset,omitempty"`
 }
 
+// NewService creates a new products service with event bus integration.
 func NewService(repo Repository, bus eventbus.Bus) *Service {
 	return &Service{repo: repo, bus: bus}
 }
 
+// RegisterRoutes registers product endpoints. Public routes are accessible
+// to all; admin routes require admin role authentication.
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /products", s.list)
 	mux.HandleFunc("GET /products/{id}", s.get)

@@ -1,3 +1,5 @@
+// Package adapters provides shared adapter implementations that bridge
+// different service interfaces, eliminating duplication between entry points.
 package adapters
 
 import (
@@ -8,6 +10,8 @@ import (
 	"github.com/thaletto/krcrackers-go/services/orders"
 )
 
+// UserProviderAdapter wraps auth.Repository to implement orders.UserProvider,
+// converting between auth.User and orders.User types.
 type UserProviderAdapter struct {
 	Repo auth.Repository
 }
@@ -20,6 +24,8 @@ func (a *UserProviderAdapter) GetUser(ctx context.Context, id int) (orders.User,
 	return orders.User{ID: u.ID, Email: u.Email, Name: u.Name, Phone: u.Phone}, nil
 }
 
+// AddressProviderAdapter queries the database directly to implement
+// orders.AddressProvider, fetching customer addresses by ID.
 type AddressProviderAdapter struct {
 	DB database.DB
 }

@@ -7,6 +7,7 @@ import (
 	"github.com/thaletto/krcrackers-go/database"
 )
 
+// User represents a user account with authentication details.
 type User struct {
 	ID             int       `json:"id"`
 	Email          string    `json:"email"`
@@ -21,6 +22,7 @@ type User struct {
 	UpdatedAt      time.Time `json:"updatedAt"`
 }
 
+// Repository defines the data access interface for users and refresh tokens.
 type Repository interface {
 	Create(ctx context.Context, email, name, phone, authProvider, authProviderID, passwordHash, role string) (User, error)
 	GetByEmail(ctx context.Context, email string) (User, error)
@@ -36,6 +38,7 @@ type repo struct {
 	db database.DB
 }
 
+// NewRepository returns a new auth repository backed by the given database.
 func NewRepository(db database.DB) Repository {
 	return &repo{db: db}
 }

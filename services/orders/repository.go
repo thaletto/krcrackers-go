@@ -9,8 +9,16 @@ import (
 	"github.com/thaletto/krcrackers-go/database"
 )
 
+// OrderStatus represents the lifecycle state of an order.
 type OrderStatus string
 
+// Valid order status values and their allowed transitions:
+//
+//	pending -> confirmed, cancelled
+//	confirmed -> shipped, cancelled
+//	shipped -> delivered, cancelled
+//	delivered (terminal)
+//	cancelled (terminal)
 const (
 	StatusPending   OrderStatus = "pending"
 	StatusConfirmed OrderStatus = "confirmed"
@@ -19,6 +27,7 @@ const (
 	StatusCancelled OrderStatus = "cancelled"
 )
 
+// OrderItemFields contains the data fields for an order line item.
 type OrderItemFields struct {
 	ProductID   int     `json:"productId"`
 	ProductName string  `json:"productName"`
@@ -32,6 +41,7 @@ type OrderItem struct {
 	OrderItemFields
 }
 
+// OrderFields contains the data fields for an order header.
 type OrderFields struct {
 	Status               OrderStatus `json:"status"`
 	UserID               *int        `json:"userId,omitempty"`
@@ -50,6 +60,7 @@ type OrderFields struct {
 	PaymentReference     string      `json:"paymentReference,omitempty"`
 }
 
+// Order represents a complete order with its line items.
 type Order struct {
 	ID        int         `json:"id"`
 	OrderFields
@@ -57,11 +68,13 @@ type Order struct {
 	CreatedAt string      `json:"createdAt,omitempty"`
 }
 
+// OrderInput is the request payload for creating or updating an order.
 type OrderInput struct {
 	OrderFields
 	Items []OrderItemFields `json:"items"`
 }
 
+// ListOrdersResponse is the paginated response for order list endpoints.
 type ListOrdersResponse struct {
 	Items  []Order `json:"items"`
 	Total  int     `json:"total"`
@@ -69,6 +82,7 @@ type ListOrdersResponse struct {
 	Offset *int    `json:"offset,omitempty"`
 }
 
+// DashboardStats contains aggregated order statistics for the admin dashboard.
 type DashboardStats struct {
 	TotalOrders    int     `json:"totalOrders"`
 	PendingOrders  int     `json:"pendingOrders"`
@@ -76,18 +90,22 @@ type DashboardStats struct {
 	NewCustomers   int     `json:"newCustomers"`
 }
 
+// UserProvider is an interface for fetching user data, used during checkout.
 type UserProvider interface {
 	GetUser(ctx context.Context, id int) (User, error)
 }
 
+// AddressProvider is an interface for fetching customer addresses, used during checkout.
 type AddressProvider interface {
 	GetAddress(ctx context.Context, id int) (Address, error)
 }
 
+// UploadsService is an interface for file uploads, used for payment screenshots.
 type UploadsService interface {
 	Put(ctx context.Context, key string, body io.Reader, contentType string) (string, error)
 }
 
+// User holds minimal user data needed for order creation.
 type User struct {
 	ID    int
 	Email string
@@ -95,6 +113,7 @@ type User struct {
 	Phone string
 }
 
+// Address holds shipping address data snapshotted at checkout time.
 type Address struct {
 	ID      int
 	UserID  int
@@ -106,6 +125,7 @@ type Address struct {
 	Country string
 }
 
+// Repository defines the data access interface for orders.
 type Repository interface {
 	Create(ctx context.Context, input OrderInput) (Order, error)
 	List(ctx context.Context, limit, offset int) (ListOrdersResponse, error)
@@ -124,6 +144,7 @@ type repo struct {
 	db database.DB
 }
 
+// NewRepository returns a new orders repository backed by the given database.
 func NewRepository(db database.DB) Repository {
 	return &repo{db: db}
 }

@@ -1,3 +1,6 @@
+// Package search provides Meilisearch integration for full-text product search
+// with typo-tolerance, filtering, and sorting. Products are synced via the
+// event bus when created, updated, or deleted.
 package search
 
 import (
@@ -10,6 +13,7 @@ import (
 
 const indexName = "products"
 
+// ProductDocument represents a product in the Meilisearch index.
 type ProductDocument struct {
 	ID           int64   `json:"id"`
 	Name         string  `json:"name"`
@@ -21,6 +25,7 @@ type ProductDocument struct {
 	ComparePrice float64 `json:"compare_price"`
 }
 
+// SearchFilters defines parameters for Meilisearch queries.
 type SearchFilters struct {
 	Query    string
 	Category string
@@ -32,11 +37,13 @@ type SearchFilters struct {
 	Offset   int
 }
 
+// SearchResult contains matched product IDs and total count.
 type SearchResult struct {
 	ProductIDs []int
 	Total      int
 }
 
+// Service defines the interface for Meilisearch product search operations.
 type Service interface {
 	IndexProduct(ctx context.Context, doc ProductDocument) error
 	DeleteProduct(ctx context.Context, id int) error
@@ -48,6 +55,7 @@ type service struct {
 	client meilisearch.ServiceManager
 }
 
+// NewService creates a Meilisearch service and configures filterable/sortable attributes.
 func NewService(url, apiKey string) (Service, error) {
 	client := meilisearch.New(url, meilisearch.WithAPIKey(apiKey))
 	idx := client.Index(indexName)

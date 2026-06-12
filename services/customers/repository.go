@@ -9,6 +9,7 @@ import (
 	"github.com/thaletto/krcrackers-go/services/auth"
 )
 
+// Address represents a customer shipping address.
 type Address struct {
 	ID        int       `json:"id"`
 	UserID    int       `json:"userId"`
@@ -23,6 +24,7 @@ type Address struct {
 	UpdatedAt time.Time `json:"updatedAt"`
 }
 
+// AddressInput is the request payload for creating or updating an address.
 type AddressInput struct {
 	Label     string `json:"label"`
 	Street    string `json:"street"`
@@ -33,6 +35,7 @@ type AddressInput struct {
 	IsDefault bool   `json:"isDefault"`
 }
 
+// Repository defines the data access interface for customer profiles and addresses.
 type Repository interface {
 	GetProfile(ctx context.Context, userID int) (auth.User, error)
 	UpdateProfile(ctx context.Context, userID int, name, phone string) (auth.User, error)
@@ -48,6 +51,7 @@ type repo struct {
 	db database.DB
 }
 
+// NewRepository returns a new customers repository backed by the given database.
 func NewRepository(db database.DB) Repository {
 	return &repo{db: db}
 }

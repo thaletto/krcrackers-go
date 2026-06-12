@@ -1,5 +1,8 @@
+// Package events defines event name constants and payload types used
+// across the event bus for cross-service communication.
 package events
 
+// Event name constants for product lifecycle.
 const (
 	ProductCreated = "product.created"
 	ProductUpdated = "product.updated"
@@ -12,6 +15,7 @@ const (
 	OrderCancelled = "order.cancelled"
 )
 
+// ProductEvent carries product data for product lifecycle events.
 type ProductEvent struct {
 	ID           int
 	Name         string
@@ -23,6 +27,7 @@ type ProductEvent struct {
 	ComparePrice float64
 }
 
+// OrderEvent carries order data for order lifecycle events.
 type OrderEvent struct {
 	OrderID int
 	Phone   string

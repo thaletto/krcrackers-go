@@ -9,6 +9,7 @@ import (
 	"github.com/thaletto/krcrackers-go/database"
 )
 
+// Repository defines the data access interface for products.
 type Repository interface {
 	Create(ctx context.Context, input ProductInput) (Product, error)
 	List(ctx context.Context, limit, offset int) (ListProductsResponse, error)
@@ -19,6 +20,7 @@ type Repository interface {
 	GetByIDs(ctx context.Context, ids []int) ([]Product, error)
 }
 
+// Filter defines search and filtering parameters for product queries.
 type Filter struct {
 	Query    string
 	Category string
@@ -34,6 +36,7 @@ type repo struct {
 	db database.DB
 }
 
+// NewRepository returns a new products repository backed by the given database.
 func NewRepository(db database.DB) Repository {
 	return &repo{db: db}
 }

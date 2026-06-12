@@ -1,3 +1,6 @@
+// Package notifications provides order notification delivery via the
+// WhatsApp Cloud API. Falls back to a no-op service when credentials
+// are not configured.
 package notifications
 
 import (
@@ -10,6 +13,7 @@ import (
 	"time"
 )
 
+// Service defines the interface for sending order notifications.
 type Service interface {
 	SendOrderPlaced(ctx context.Context, phone string, orderID int)
 	SendPaymentConfirmed(ctx context.Context, phone string, orderID int)
@@ -26,6 +30,8 @@ type whatsappClient struct {
 
 var httpClient = &http.Client{Timeout: 10 * time.Second}
 
+// NewWhatsAppService returns a WhatsApp client if credentials are provided,
+// otherwise returns a no-op service that silently drops all notifications.
 func NewWhatsAppService(apiToken, phoneNumberID, fromNumber string) Service {
 	if apiToken == "" || phoneNumberID == "" {
 		return &noopService{}

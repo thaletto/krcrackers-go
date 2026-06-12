@@ -8,14 +8,17 @@ import (
 	"github.com/thaletto/krcrackers-go/eventbus/events"
 )
 
+// Subscriber listens to product lifecycle events and syncs them to Meilisearch.
 type Subscriber struct {
 	service Service
 }
 
+// NewSubscriber creates a new search event subscriber.
 func NewSubscriber(service Service) *Subscriber {
 	return &Subscriber{service: service}
 }
 
+// RegisterHandlers subscribes to product created/updated/deleted events.
 func (s *Subscriber) RegisterHandlers(bus eventbus.Bus) {
 	bus.Subscribe(events.ProductCreated, s.handleProductUpsert)
 	bus.Subscribe(events.ProductUpdated, s.handleProductUpsert)

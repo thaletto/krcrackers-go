@@ -7,14 +7,17 @@ import (
 	"github.com/thaletto/krcrackers-go/eventbus/events"
 )
 
+// Subscriber listens to order lifecycle events and sends WhatsApp notifications.
 type Subscriber struct {
 	service Service
 }
 
+// NewSubscriber creates a new notification event subscriber.
 func NewSubscriber(service Service) *Subscriber {
 	return &Subscriber{service: service}
 }
 
+// RegisterHandlers subscribes to all order lifecycle events.
 func (s *Subscriber) RegisterHandlers(bus eventbus.Bus) {
 	bus.Subscribe(events.OrderPlaced, s.handleOrderPlaced)
 	bus.Subscribe(events.OrderConfirmed, s.handleOrderConfirmed)

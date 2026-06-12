@@ -1,3 +1,6 @@
+// Package orders provides order lifecycle management including checkout,
+// customer order viewing, admin status management, and dashboard statistics.
+// Order changes are published to the event bus for notification delivery.
 package orders
 
 import (
@@ -16,6 +19,7 @@ import (
 	"github.com/thaletto/krcrackers-go/services/uploads"
 )
 
+// Service handles order HTTP endpoints, checkout flow, and event publishing.
 type Service struct {
 	repo         Repository
 	userProvider UserProvider
@@ -24,6 +28,8 @@ type Service struct {
 	bus          eventbus.Bus
 }
 
+// NewService creates a new orders service with user/address providers,
+// uploads service, and event bus integration.
 func NewService(
 	repo Repository,
 	userProvider UserProvider,
@@ -40,6 +46,7 @@ func NewService(
 	}
 }
 
+// RegisterRoutes registers all order endpoints on the given mux.
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("POST /orders", s.create)
 	mux.HandleFunc("GET /orders", s.list)
@@ -430,6 +437,7 @@ func (s *Service) adminDashboard(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, stats)
 }
 
+// CheckoutItem represents a line item in the checkout form submission.
 type CheckoutItem struct {
 	ProductID   int     `json:"productId"`
 	ProductName string  `json:"productName"`

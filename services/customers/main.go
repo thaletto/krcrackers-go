@@ -1,3 +1,5 @@
+// Package customers provides customer profile and address management endpoints.
+// All routes require authentication via the auth middleware.
 package customers
 
 import (
@@ -10,14 +12,17 @@ import (
 	"github.com/thaletto/krcrackers-go/services/auth"
 )
 
+// Service handles customer profile and address HTTP endpoints.
 type Service struct {
 	repo Repository
 }
 
+// NewService creates a new customers service.
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// RegisterRoutes registers all customer endpoints on the given mux.
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /customers/profile", auth.WithAuth(http.HandlerFunc(s.getProfile)).ServeHTTP)
 	mux.HandleFunc("PUT /customers/profile", auth.WithAuth(http.HandlerFunc(s.updateProfile)).ServeHTTP)

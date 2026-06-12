@@ -99,6 +99,8 @@ func fetchJWKS() (map[string]*rsa.PublicKey, error) {
 	return keys, nil
 }
 
+// VerifyGoogleIDToken validates a Google ID token using Google's JWKS endpoint.
+// Keys are cached for 6 hours to reduce latency and avoid rate limits.
 func VerifyGoogleIDToken(idToken string) (*googleClaims, error) {
 	keys, err := fetchJWKS()
 	if err != nil {

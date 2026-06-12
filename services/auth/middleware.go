@@ -17,6 +17,8 @@ type ContextUser struct {
 	Role string
 }
 
+// WithAuth returns middleware that validates the JWT access token from
+// cookies or Authorization header and injects the user into context.
 func WithAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := extractToken(r)
@@ -39,6 +41,8 @@ func WithAuth(next http.Handler) http.Handler {
 	})
 }
 
+// WithAdmin returns middleware that checks the authenticated user has the
+// "admin" role. Must be chained after WithAuth.
 func WithAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(UserContextKey).(*ContextUser)
@@ -50,6 +54,9 @@ func WithAdmin(next http.Handler) http.Handler {
 	})
 }
 
+// WithOptionalAuth returns middleware that optionally authenticates the
+// request. If a valid token is present, the user is injected into context;
+// otherwise the request proceeds unauthenticated.
 func WithOptionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := extractToken(r)
@@ -66,6 +73,8 @@ func WithOptionalAuth(next http.Handler) http.Handler {
 	})
 }
 
+// GetUser extracts the authenticated user from the request context.
+// Returns nil if the request is not authenticated.
 func GetUser(r *http.Request) *ContextUser {
 	u, _ := r.Context().Value(UserContextKey).(*ContextUser)
 	return u

@@ -1,3 +1,6 @@
+// Package invoices provides on-demand PDF invoice generation for orders.
+// Invoice numbers are sequential (INV-0001, INV-0002, ...) and stored
+// on the order record after first generation.
 package invoices
 
 import (
@@ -14,6 +17,7 @@ import (
 	"github.com/thaletto/krcrackers-go/services/auth"
 )
 
+// InvoiceItem represents a line item on an invoice.
 type InvoiceItem struct {
 	ProductName string  `json:"productName"`
 	Quantity    int     `json:"quantity"`
@@ -21,6 +25,7 @@ type InvoiceItem struct {
 	LineTotal   float64 `json:"lineTotal"`
 }
 
+// Invoice contains all data needed to generate a PDF invoice.
 type Invoice struct {
 	Number         string        `json:"number"`
 	Date           time.Time     `json:"date"`
@@ -37,20 +42,24 @@ type Invoice struct {
 	Total          float64       `json:"total"`
 }
 
+// Repository defines the data access interface for invoice data.
 type Repository interface {
 	GetOrderWithItems(ctx context.Context, orderID int) (Invoice, error)
 	GetNextInvoiceNumber(ctx context.Context) (string, error)
 	SaveInvoiceNumber(ctx context.Context, orderID int, invoiceNumber string) error
 }
 
+// Service handles invoice HTTP endpoints and PDF generation.
 type Service struct {
 	repo Repository
 }
 
+// NewService creates a new invoices service.
 func NewService(repo Repository) *Service {
 	return &Service{repo: repo}
 }
 
+// RegisterRoutes registers invoice endpoints on the given mux.
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("GET /invoices/{id}", auth.WithAuth(http.HandlerFunc(s.getCustomerInvoice)).ServeHTTP)
 	mux.HandleFunc("GET /admin/invoices/{id}", auth.WithAuth(auth.WithAdmin(http.HandlerFunc(s.getAdminInvoice))).ServeHTTP)
@@ -105,6 +114,7 @@ type repo struct {
 	db database.DB
 }
 
+// NewRepository returns a new invoices repository backed by the given database.
 func NewRepository(db database.DB) Repository {
 	return &repo{db: db}
 }
