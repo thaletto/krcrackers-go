@@ -3,10 +3,108 @@ package orders
 import (
 	"context"
 	"fmt"
+	"io"
 
 	apperrors "github.com/thaletto/krcrackers-go/errors"
 	"github.com/thaletto/krcrackers-go/database"
 )
+
+type OrderStatus string
+
+const (
+	StatusPending   OrderStatus = "pending"
+	StatusConfirmed OrderStatus = "confirmed"
+	StatusShipped   OrderStatus = "shipped"
+	StatusDelivered OrderStatus = "delivered"
+	StatusCancelled OrderStatus = "cancelled"
+)
+
+type OrderItemFields struct {
+	ProductID   int     `json:"productId"`
+	ProductName string  `json:"productName"`
+	Price       float64 `json:"price"`
+	Quantity    int     `json:"quantity"`
+	Total       float64 `json:"total"`
+}
+
+type OrderItem struct {
+	ID int `json:"id"`
+	OrderItemFields
+}
+
+type OrderFields struct {
+	Status               OrderStatus `json:"status"`
+	UserID               *int        `json:"userId,omitempty"`
+	UserName             string      `json:"userName"`
+	Email                string      `json:"email"`
+	Phone                string      `json:"phone"`
+	Street               string      `json:"street"`
+	TownOrCity           string      `json:"townOrCity"`
+	State                string      `json:"state"`
+	Pincode              string      `json:"pincode"`
+	Notes                *string     `json:"notes,omitempty"`
+	DeliveryRegion       string      `json:"deliveryRegion"`
+	DeliveryLocation     string      `json:"deliveryLocation"`
+	Total                float64     `json:"total"`
+	PaymentScreenshotURL string      `json:"paymentScreenshotUrl,omitempty"`
+	PaymentReference     string      `json:"paymentReference,omitempty"`
+}
+
+type Order struct {
+	ID        int         `json:"id"`
+	OrderFields
+	Items     []OrderItem `json:"items"`
+	CreatedAt string      `json:"createdAt,omitempty"`
+}
+
+type OrderInput struct {
+	OrderFields
+	Items []OrderItemFields `json:"items"`
+}
+
+type ListOrdersResponse struct {
+	Items  []Order `json:"items"`
+	Total  int     `json:"total"`
+	Limit  *int    `json:"limit,omitempty"`
+	Offset *int    `json:"offset,omitempty"`
+}
+
+type DashboardStats struct {
+	TotalOrders    int     `json:"totalOrders"`
+	PendingOrders  int     `json:"pendingOrders"`
+	RevenueMonth   float64 `json:"revenueMonth"`
+	NewCustomers   int     `json:"newCustomers"`
+}
+
+type UserProvider interface {
+	GetUser(ctx context.Context, id int) (User, error)
+}
+
+type AddressProvider interface {
+	GetAddress(ctx context.Context, id int) (Address, error)
+}
+
+type UploadsService interface {
+	Put(ctx context.Context, key string, body io.Reader, contentType string) (string, error)
+}
+
+type User struct {
+	ID    int
+	Email string
+	Name  string
+	Phone string
+}
+
+type Address struct {
+	ID      int
+	UserID  int
+	Label   string
+	Street  string
+	City    string
+	State   string
+	Pincode string
+	Country string
+}
 
 type Repository interface {
 	Create(ctx context.Context, input OrderInput) (Order, error)
@@ -14,6 +112,12 @@ type Repository interface {
 	Get(ctx context.Context, id int) (Order, error)
 	Update(ctx context.Context, id int, input OrderInput) (Order, error)
 	Delete(ctx context.Context, id int) error
+	Checkout(ctx context.Context, input OrderInput) (Order, error)
+	ListForUser(ctx context.Context, userID int, limit, offset int) (ListOrdersResponse, error)
+	GetForUser(ctx context.Context, orderID, userID int) (Order, error)
+	UpdateStatus(ctx context.Context, orderID int, status OrderStatus) (Order, error)
+	ListAllFilter(ctx context.Context, status string, limit, offset int) (ListOrdersResponse, error)
+	GetDashboardStats(ctx context.Context) (DashboardStats, error)
 }
 
 type repo struct {
@@ -30,10 +134,15 @@ func (r *repo) Create(ctx context.Context, input OrderInput) (Order, error) {
 		return Order{}, fmt.Errorf("begin tx: %w", err)
 	}
 
+	status := input.Status
+	if status == "" {
+		status = StatusPending
+	}
+
 	res, err := tx.Execute(ctx, `
-		INSERT INTO orders (user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total)
+		INSERT INTO orders (user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, string(status))
 	if err != nil {
 		_ = tx.Rollback()
 		return Order{}, fmt.Errorf("insert order: %w", err)
@@ -76,9 +185,8 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListOrdersResponse,
 	}
 
 	query := `
-		SELECT id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total
-		FROM orders
-		ORDER BY id
+		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
+		FROM orders ORDER BY id DESC
 	`
 	var queryArgs []any
 	if limit > 0 {
@@ -105,17 +213,12 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListOrdersResponse,
 		}
 		items = append(items, o)
 	}
-	return ListOrdersResponse{
-		Items:  items,
-		Total:  total,
-		Limit:  limitPtr,
-		Offset: offsetPtr,
-	}, nil
+	return ListOrdersResponse{Items: items, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
 }
 
 func (r *repo) Get(ctx context.Context, id int) (Order, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total
+		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
 		FROM orders WHERE id = ?
 	`, id)
 	if err != nil {
@@ -132,8 +235,7 @@ func (r *repo) Get(ctx context.Context, id int) (Order, error) {
 
 	itemRows, err := r.db.Query(ctx, `
 		SELECT id, product_id, product_name, price, quantity, total
-		FROM order_items WHERE order_id = ?
-		ORDER BY id
+		FROM order_items WHERE order_id = ? ORDER BY id
 	`, id)
 	if err != nil {
 		return Order{}, fmt.Errorf("get order items %d: %w", id, err)
@@ -225,10 +327,272 @@ func (r *repo) Delete(ctx context.Context, id int) error {
 	return tx.Commit()
 }
 
+func (r *repo) Checkout(ctx context.Context, input OrderInput) (Order, error) {
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Order{}, fmt.Errorf("begin tx: %w", err)
+	}
+
+	status := input.Status
+	if status == "" {
+		status = StatusPending
+	}
+
+	res, err := tx.Execute(ctx, `
+		INSERT INTO orders (status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, string(status), input.UserID, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, input.PaymentScreenshotURL, input.PaymentReference)
+	if err != nil {
+		_ = tx.Rollback()
+		return Order{}, fmt.Errorf("insert order: %w", err)
+	}
+	orderID := int(res.LastInsertID)
+
+	items := make([]OrderItem, 0, len(input.Items))
+	for i, item := range input.Items {
+		itemRes, err := tx.Execute(ctx, `
+			INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, orderID, item.ProductID, item.ProductName, item.Price, item.Quantity, item.Total)
+		if err != nil {
+			_ = tx.Rollback()
+			return Order{}, fmt.Errorf("insert order item: %w", err)
+		}
+		items = append(items, OrderItem{
+			ID:              int(itemRes.LastInsertID),
+			OrderItemFields: input.Items[i],
+		})
+	}
+
+	if err := tx.Commit(); err != nil {
+		return Order{}, fmt.Errorf("commit tx: %w", err)
+	}
+
+	return Order{ID: orderID, OrderFields: input.OrderFields, Items: items}, nil
+}
+
+func (r *repo) ListForUser(ctx context.Context, userID int, limit, offset int) (ListOrdersResponse, error) {
+	countRows, err := r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders WHERE user_id = ?`, userID)
+	if err != nil {
+		return ListOrdersResponse{}, err
+	}
+	total := 0
+	if len(countRows) > 0 {
+		if v, err := countRows[0].Int("total"); err == nil {
+			total = int(v)
+		}
+	}
+
+	query := `
+		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
+		FROM orders WHERE user_id = ? ORDER BY id DESC
+	`
+	var args []any
+	args = append(args, userID)
+	if limit > 0 {
+		query += " LIMIT ? OFFSET ?"
+		args = append(args, limit, offset)
+	}
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return ListOrdersResponse{}, err
+	}
+
+	var limitPtr, offsetPtr *int
+	if limit > 0 {
+		limitPtr = &limit
+		offsetPtr = &offset
+	}
+
+	orders := make([]Order, 0, len(rows))
+	for _, row := range rows {
+		o, err := rowToOrder(row)
+		if err != nil {
+			return ListOrdersResponse{}, err
+		}
+		orders = append(orders, o)
+	}
+	return ListOrdersResponse{Items: orders, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
+}
+
+func (r *repo) GetForUser(ctx context.Context, orderID, userID int) (Order, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
+		FROM orders WHERE id = ? AND user_id = ?
+	`, orderID, userID)
+	if err != nil {
+		return Order{}, err
+	}
+	if len(rows) == 0 {
+		return Order{}, fmt.Errorf("order %d: %w", orderID, apperrors.ErrNotFound)
+	}
+
+	order, err := rowToOrder(rows[0])
+	if err != nil {
+		return Order{}, err
+	}
+
+	itemRows, err := r.db.Query(ctx, `
+		SELECT id, product_id, product_name, price, quantity, total
+		FROM order_items WHERE order_id = ? ORDER BY id
+	`, orderID)
+	if err != nil {
+		return Order{}, err
+	}
+
+	order.Items = make([]OrderItem, 0, len(itemRows))
+	for _, row := range itemRows {
+		item, err := rowToOrderItem(row)
+		if err != nil {
+			return Order{}, err
+		}
+		order.Items = append(order.Items, item)
+	}
+
+	return order, nil
+}
+
+func (r *repo) UpdateStatus(ctx context.Context, orderID int, status OrderStatus) (Order, error) {
+	order, err := r.Get(ctx, orderID)
+	if err != nil {
+		return Order{}, err
+	}
+
+	if !isValidTransition(order.Status, status) {
+		return Order{}, fmt.Errorf("invalid status transition from %s to %s", order.Status, status)
+	}
+
+	_, err = r.db.Execute(ctx, `UPDATE orders SET status = ? WHERE id = ?`, string(status), orderID)
+	if err != nil {
+		return Order{}, err
+	}
+
+	if status == StatusConfirmed {
+		r.db.Execute(ctx, `UPDATE orders SET verified_at = CURRENT_TIMESTAMP WHERE id = ?`, orderID)
+	}
+
+	return r.Get(ctx, orderID)
+}
+
+func (r *repo) ListAllFilter(ctx context.Context, status string, limit, offset int) (ListOrdersResponse, error) {
+	where := "1=1"
+	var args []any
+	if status != "" {
+		where = "status = ?"
+		args = append(args, status)
+	}
+
+	countRows, err := r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders WHERE `+where, args...)
+	if err != nil {
+		return ListOrdersResponse{}, err
+	}
+	total := 0
+	if len(countRows) > 0 {
+		if v, err := countRows[0].Int("total"); err == nil {
+			total = int(v)
+		}
+	}
+
+	query := `
+		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
+		FROM orders WHERE ` + where + ` ORDER BY id DESC
+	`
+	var queryArgs = make([]any, len(args))
+	copy(queryArgs, args)
+	if limit > 0 {
+		query += " LIMIT ? OFFSET ?"
+		queryArgs = append(queryArgs, limit, offset)
+	}
+
+	rows, err := r.db.Query(ctx, query, queryArgs...)
+	if err != nil {
+		return ListOrdersResponse{}, err
+	}
+
+	var limitPtr, offsetPtr *int
+	if limit > 0 {
+		limitPtr = &limit
+		offsetPtr = &offset
+	}
+
+	orders := make([]Order, 0, len(rows))
+	for _, row := range rows {
+		o, err := rowToOrder(row)
+		if err != nil {
+			return ListOrdersResponse{}, err
+		}
+		orders = append(orders, o)
+	}
+	return ListOrdersResponse{Items: orders, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
+}
+
+func (r *repo) GetDashboardStats(ctx context.Context) (DashboardStats, error) {
+	var stats DashboardStats
+
+	rows, err := r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders`)
+	if err == nil && len(rows) > 0 {
+		if v, err := rows[0].Int("total"); err == nil {
+			stats.TotalOrders = int(v)
+		}
+	}
+
+	rows, err = r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders WHERE status = 'pending'`)
+	if err == nil && len(rows) > 0 {
+		if v, err := rows[0].Int("total"); err == nil {
+			stats.PendingOrders = int(v)
+		}
+	}
+
+	rows, err = r.db.Query(ctx, `SELECT COALESCE(SUM(total), 0) AS revenue FROM orders WHERE created_at >= date('now', 'start of month')`)
+	if err == nil && len(rows) > 0 {
+		if v, err := rows[0].Float("revenue"); err == nil {
+			stats.RevenueMonth = v
+		}
+	}
+
+	rows, err = r.db.Query(ctx, `SELECT COUNT(*) AS total FROM users WHERE created_at >= date('now', 'start of month')`)
+	if err == nil && len(rows) > 0 {
+		if v, err := rows[0].Int("total"); err == nil {
+			stats.NewCustomers = int(v)
+		}
+	}
+
+	return stats, nil
+}
+
+var validTransitions = map[OrderStatus][]OrderStatus{
+	StatusPending:   {StatusConfirmed, StatusCancelled},
+	StatusConfirmed: {StatusShipped, StatusCancelled},
+	StatusShipped:   {StatusDelivered, StatusCancelled},
+}
+
+func isValidTransition(from, to OrderStatus) bool {
+	allowed, ok := validTransitions[from]
+	if !ok {
+		return false
+	}
+	for _, s := range allowed {
+		if s == to {
+			return true
+		}
+	}
+	return false
+}
+
 func rowToOrder(row database.Row) (Order, error) {
 	id, err := row.Int("id")
 	if err != nil {
 		return Order{}, err
+	}
+	statusStr, err := row.String("status")
+	if err != nil {
+		statusStr = "pending"
+	}
+	var userID *int
+	if userIDVal, err := row.Int("user_id"); err == nil && userIDVal > 0 {
+		uid := int(userIDVal)
+		userID = &uid
 	}
 	userName, err := row.String("user_name")
 	if err != nil {
@@ -264,31 +628,49 @@ func rowToOrder(row database.Row) (Order, error) {
 	}
 	deliveryRegion, err := row.String("delivery_region")
 	if err != nil {
-		return Order{}, err
+		deliveryRegion = ""
 	}
 	deliveryLocation, err := row.String("delivery_location")
 	if err != nil {
-		return Order{}, err
+		deliveryLocation = ""
 	}
 	total, err := row.Float("total")
 	if err != nil {
 		return Order{}, err
 	}
+	screenshotURL, err := row.String("payment_screenshot_url")
+	if err != nil {
+		screenshotURL = ""
+	}
+	paymentRef, err := row.String("payment_reference")
+	if err != nil {
+		paymentRef = ""
+	}
+	createdAt, err := row.String("created_at")
+	if err != nil {
+		createdAt = ""
+	}
+
 	return Order{
 		ID: int(id),
 		OrderFields: OrderFields{
-			UserName:         userName,
-			Email:            email,
-			Phone:            phone,
-			Street:           street,
-			TownOrCity:       townOrCity,
-			State:            state,
-			Pincode:          pincode,
-			Notes:            notes,
-			DeliveryRegion:   deliveryRegion,
-			DeliveryLocation: deliveryLocation,
-			Total:            total,
+			Status:               OrderStatus(statusStr),
+			UserID:               userID,
+			UserName:             userName,
+			Email:                email,
+			Phone:                phone,
+			Street:               street,
+			TownOrCity:           townOrCity,
+			State:                state,
+			Pincode:              pincode,
+			Notes:                notes,
+			DeliveryRegion:       deliveryRegion,
+			DeliveryLocation:     deliveryLocation,
+			Total:                total,
+			PaymentScreenshotURL: screenshotURL,
+			PaymentReference:     paymentRef,
 		},
+		CreatedAt: createdAt,
 	}, nil
 }
 
