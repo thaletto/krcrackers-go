@@ -1,6 +1,7 @@
 package products
 
 import (
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -8,11 +9,15 @@ import (
 	"strconv"
 
 	apperrors "github.com/thaletto/krcrackers-go/errors"
+	"github.com/thaletto/krcrackers-go/eventbus"
+	"github.com/thaletto/krcrackers-go/eventbus/events"
 	"github.com/thaletto/krcrackers-go/server"
+	"github.com/thaletto/krcrackers-go/services/auth"
 )
 
 type Service struct {
 	repo Repository
+	bus  eventbus.Bus
 }
 
 type ProductFields struct {
@@ -41,16 +46,20 @@ type ListProductsResponse struct {
 	Offset *int      `json:"offset,omitempty"`
 }
 
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+func NewService(repo Repository, bus eventbus.Bus) *Service {
+	return &Service{repo: repo, bus: bus}
 }
 
 func (s *Service) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /products", s.create)
 	mux.HandleFunc("GET /products", s.list)
 	mux.HandleFunc("GET /products/{id}", s.get)
-	mux.HandleFunc("PUT /products/{id}", s.update)
-	mux.HandleFunc("DELETE /products/{id}", s.delete)
+
+	adminAuth := func(h http.HandlerFunc) http.HandlerFunc {
+		return auth.WithAuth(auth.WithAdmin(h)).ServeHTTP
+	}
+	mux.HandleFunc("POST /admin/products", adminAuth(s.create))
+	mux.HandleFunc("PUT /admin/products/{id}", adminAuth(s.update))
+	mux.HandleFunc("DELETE /admin/products/{id}", adminAuth(s.delete))
 }
 
 func (s *Service) create(w http.ResponseWriter, r *http.Request) {
@@ -70,20 +79,48 @@ func (s *Service) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishProductEvent(r.Context(), events.ProductCreated, product)
+
 	server.WriteJSON(w, http.StatusCreated, product)
 }
 
 func (s *Service) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
+	query := q.Get("q")
+	category := q.Get("category")
+	brand := q.Get("brand")
+	minPrice, _ := strconv.ParseFloat(q.Get("min_price"), 64)
+	maxPrice, _ := strconv.ParseFloat(q.Get("max_price"), 64)
+	sort := q.Get("sort")
 	limit, _ := strconv.Atoi(q.Get("limit"))
 	offset, _ := strconv.Atoi(q.Get("offset"))
+
+	hasFilters := query != "" || category != "" || brand != "" || minPrice > 0 || maxPrice > 0 || sort != ""
+
+	if hasFilters {
+		resp, err := s.repo.Search(r.Context(), Filter{
+			Query:    query,
+			Category: category,
+			Brand:    brand,
+			MinPrice: minPrice,
+			MaxPrice: maxPrice,
+			Sort:     sort,
+			Limit:    limit,
+			Offset:   offset,
+		})
+		if err != nil {
+			server.WriteError(w, http.StatusInternalServerError, "failed to search products")
+			return
+		}
+		server.WriteJSON(w, http.StatusOK, resp)
+		return
+	}
 
 	resp, err := s.repo.List(r.Context(), limit, offset)
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "failed to list products")
 		return
 	}
-
 	server.WriteJSON(w, http.StatusOK, resp)
 }
 
@@ -134,6 +171,8 @@ func (s *Service) update(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishProductEvent(r.Context(), events.ProductUpdated, product)
+
 	server.WriteJSON(w, http.StatusOK, product)
 }
 
@@ -153,7 +192,50 @@ func (s *Service) delete(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	s.publishProductDeleteEvent(r.Context(), id)
+
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (s *Service) publishProductEvent(ctx context.Context, eventName string, p Product) {
+	if s.bus == nil {
+		return
+	}
+	brand := ""
+	if p.Brand != nil {
+		brand = *p.Brand
+	}
+	desc := ""
+	if p.Description != nil {
+		desc = *p.Description
+	}
+	img := ""
+	if p.Image != nil {
+		img = *p.Image
+	}
+	s.bus.Publish(ctx, eventbus.Event{
+		Name: eventName,
+		Payload: events.ProductEvent{
+			ID:           p.ID,
+			Name:         p.Name,
+			Description:  desc,
+			Price:        p.Price,
+			Brand:        brand,
+			Category:     p.Category,
+			Image:        img,
+			ComparePrice: p.ComparePrice,
+		},
+	})
+}
+
+func (s *Service) publishProductDeleteEvent(ctx context.Context, id int) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(ctx, eventbus.Event{
+		Name:    events.ProductDeleted,
+		Payload: events.ProductEvent{ID: id},
+	})
 }
 
 func validateProductInput(p ProductInput) error {

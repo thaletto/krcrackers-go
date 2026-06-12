@@ -3,6 +3,7 @@ package products
 import (
 	"context"
 	"fmt"
+	"strings"
 
 	apperrors "github.com/thaletto/krcrackers-go/errors"
 	"github.com/thaletto/krcrackers-go/database"
@@ -11,9 +12,22 @@ import (
 type Repository interface {
 	Create(ctx context.Context, input ProductInput) (Product, error)
 	List(ctx context.Context, limit, offset int) (ListProductsResponse, error)
+	Search(ctx context.Context, filter Filter) (ListProductsResponse, error)
 	Get(ctx context.Context, id int) (Product, error)
 	Update(ctx context.Context, id int, input ProductInput) (Product, error)
 	Delete(ctx context.Context, id int) error
+	GetByIDs(ctx context.Context, ids []int) ([]Product, error)
+}
+
+type Filter struct {
+	Query    string
+	Category string
+	Brand    string
+	MinPrice float64
+	MaxPrice float64
+	Sort     string
+	Limit    int
+	Offset   int
 }
 
 type repo struct {
@@ -85,6 +99,90 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListProductsRespons
 	}, nil
 }
 
+func (r *repo) Search(ctx context.Context, filter Filter) (ListProductsResponse, error) {
+	where := []string{"1=1"}
+	var args []any
+
+	if filter.Category != "" {
+		where = append(where, "category = ?")
+		args = append(args, filter.Category)
+	}
+	if filter.Brand != "" {
+		where = append(where, "brand = ?")
+		args = append(args, filter.Brand)
+	}
+	if filter.MinPrice > 0 {
+		where = append(where, "price >= ?")
+		args = append(args, filter.MinPrice)
+	}
+	if filter.MaxPrice > 0 {
+		where = append(where, "price <= ?")
+		args = append(args, filter.MaxPrice)
+	}
+	if filter.Query != "" {
+		where = append(where, "(name LIKE ? OR description LIKE ?)")
+		args = append(args, "%"+filter.Query+"%", "%"+filter.Query+"%")
+	}
+
+	countQuery := "SELECT COUNT(*) AS total FROM products WHERE " + strings.Join(where, " AND ")
+	countRows, err := r.db.Query(ctx, countQuery, args...)
+	if err != nil {
+		return ListProductsResponse{}, fmt.Errorf("count products: %w", err)
+	}
+	total := 0
+	if len(countRows) > 0 {
+		if v, err := countRows[0].Int("total"); err == nil {
+			total = int(v)
+		}
+	}
+
+	query := `SELECT id, name, price, brand, description, category, image, compare_price
+		FROM products WHERE ` + strings.Join(where, " AND ")
+
+	switch filter.Sort {
+	case "price_asc":
+		query += " ORDER BY price ASC"
+	case "price_desc":
+		query += " ORDER BY price DESC"
+	default:
+		query += " ORDER BY id DESC"
+	}
+
+	var queryArgs = make([]any, len(args))
+	copy(queryArgs, args)
+
+	if filter.Limit > 0 {
+		query += " LIMIT ? OFFSET ?"
+		queryArgs = append(queryArgs, filter.Limit, filter.Offset)
+	}
+
+	rows, err := r.db.Query(ctx, query, queryArgs...)
+	if err != nil {
+		return ListProductsResponse{}, fmt.Errorf("search products: %w", err)
+	}
+
+	var limitPtr, offsetPtr *int
+	if filter.Limit > 0 {
+		limitPtr = &filter.Limit
+		offsetPtr = &filter.Offset
+	}
+
+	items := make([]Product, 0, len(rows))
+	for _, row := range rows {
+		p, err := rowToProduct(row)
+		if err != nil {
+			return ListProductsResponse{}, fmt.Errorf("scan product: %w", err)
+		}
+		items = append(items, p)
+	}
+	return ListProductsResponse{
+		Items:  items,
+		Total:  total,
+		Limit:  limitPtr,
+		Offset: offsetPtr,
+	}, nil
+}
+
 func (r *repo) Get(ctx context.Context, id int) (Product, error) {
 	rows, err := r.db.Query(ctx, `
 		SELECT id, name, price, brand, description, category, image, compare_price
@@ -123,6 +221,36 @@ func (r *repo) Delete(ctx context.Context, id int) error {
 		return fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
 	}
 	return nil
+}
+
+func (r *repo) GetByIDs(ctx context.Context, ids []int) ([]Product, error) {
+	if len(ids) == 0 {
+		return nil, nil
+	}
+	placeholders := make([]string, len(ids))
+	args := make([]any, len(ids))
+	for i, id := range ids {
+		placeholders[i] = "?"
+		args[i] = id
+	}
+	query := fmt.Sprintf(`
+		SELECT id, name, price, brand, description, category, image, compare_price
+		FROM products WHERE id IN (%s)
+	`, strings.Join(placeholders, ","))
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("get products by ids: %w", err)
+	}
+	products := make([]Product, 0, len(rows))
+	for _, row := range rows {
+		p, err := rowToProduct(row)
+		if err != nil {
+			return nil, err
+		}
+		products = append(products, p)
+	}
+	return products, nil
 }
 
 func productFromInput(id int, b ProductInput) Product {
