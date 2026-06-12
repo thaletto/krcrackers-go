@@ -2,10 +2,11 @@ DB_NAME    := krcrackers-products
 DUMP_FILE  := .data/prod.sql
 DB_FILE    := .data/dev.sqlite
 AIR        := $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH 2>/dev/null)/bin/air")
+SWAG       := $(shell command -v swag 2>/dev/null || echo "$$(go env GOPATH 2>/dev/null)/bin/swag")
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda test test-endpoints clean wrangler-login docs-dev docs-build docs-start
+.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda test test-endpoints clean wrangler-login docs docs-update
 
 help:                ## Show this help message
 	@echo "Targets:"
@@ -68,11 +69,10 @@ clean:               ## Remove .data/ and .wrangler/
 wrangler-login:      ## Authenticate wrangler with Cloudflare
 	wrangler login
 
-docs-dev:            ## Start docs dev server (requires bun)
-	cd docs && bun install && bun run dev
+docs:                ## Build and serve docs site
+	cd docs && bun install && bun run build && bun run start
 
-docs-build:          ## Build static docs site
-	cd docs && bun run build
-
-docs-start:          ## Preview built docs
-	cd docs && bun run start
+docs-update:         ## Regenerate OpenAPI spec, build, and serve docs
+	$(SWAG) init --output ./docs/openapi --outputTypes json --parseInternal
+	npx swagger2openapi docs/openapi/swagger.json -o docs/openapi/openapi.json 2>/dev/null
+	cd docs && bun install && bun run build && bun run start
