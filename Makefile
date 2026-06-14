@@ -3,10 +3,11 @@ DUMP_FILE  := .data/prod.sql
 DB_FILE    := .data/dev.sqlite
 AIR        := $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH 2>/dev/null)/bin/air")
 SWAG       := $(shell command -v swag 2>/dev/null || echo "$$(go env GOPATH 2>/dev/null)/bin/swag")
+ENV_FILE   := .env.production
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda test test-endpoints clean wrangler-login docs docs-update
+.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda deploy-env test test-endpoints clean wrangler-login docs docs-update
 
 help:                ## Show this help message
 	@echo "Targets:"
@@ -52,11 +53,19 @@ build-lambda:        ## Build binary for AWS Lambda (linux/arm64)
 	GOOS=linux GOARCH=arm64 go build -o bootstrap ./cmd/lambda
 	zip lambda.zip bootstrap
 
-deploy-lambda: build-lambda  ## Deploy to AWS Lambda
+deploy-lambda: build-lambda deploy-env  ## Deploy to AWS Lambda (code + env)
 	aws lambda update-function-code \
 		--function-name krcrackers \
 		--region ap-south-1 \
 		--zip-file fileb://lambda.zip
+
+deploy-env:              ## Push .env.production vars to Lambda config
+	@if [ ! -f $(ENV_FILE) ]; then echo "ERROR: $(ENV_FILE) not found"; exit 1; fi
+	@ENV_JSON=$$(python3 -c "import json; d=dict(l.split('=',1) for l in open('$(ENV_FILE)').read().strip().splitlines() if l and not l.startswith('#') and '=' in l); print(json.dumps({'FunctionName': 'krcrackers', 'Environment': {'Variables': d}}))"); \
+	aws lambda update-function-configuration \
+		--function-name krcrackers \
+		--region ap-south-1 \
+		--cli-input-json "$$ENV_JSON"
 
 test:                ## Run tests
 	go test ./...
