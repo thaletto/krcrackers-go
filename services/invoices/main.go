@@ -1,6 +1,6 @@
 // Package invoices provides on-demand PDF invoice generation for orders.
-// Invoice numbers are sequential (INV-0001, INV-0002, ...) and stored
-// on the order record after first generation.
+// Invoice numbers are derived from the order ID (INV-0001, INV-0002, ...)
+// and stored on the order record after first generation.
 package invoices
 
 import (
@@ -45,7 +45,6 @@ type Invoice struct {
 // Repository defines the data access interface for invoice data.
 type Repository interface {
 	GetOrderWithItems(ctx context.Context, orderID int) (Invoice, error)
-	GetNextInvoiceNumber(ctx context.Context) (string, error)
 	SaveInvoiceNumber(ctx context.Context, orderID int, invoiceNumber string) error
 }
 
@@ -89,11 +88,7 @@ func (s *Service) getCustomerInvoice(w http.ResponseWriter, r *http.Request) {
 	}
 
 	if invoice.Number == "" {
-		invoiceNumber, err := s.repo.GetNextInvoiceNumber(r.Context())
-		if err != nil {
-			server.WriteError(w, http.StatusInternalServerError, "failed to generate invoice number")
-			return
-		}
+		invoiceNumber := formatInvoiceNumber(id)
 		if err := s.repo.SaveInvoiceNumber(r.Context(), id, invoiceNumber); err != nil {
 			server.WriteError(w, http.StatusInternalServerError, "failed to save invoice number")
 			return
@@ -208,43 +203,8 @@ func (r *repo) SaveInvoiceNumber(ctx context.Context, orderID int, invoiceNumber
 	return err
 }
 
-func (r *repo) GetNextInvoiceNumber(ctx context.Context) (string, error) {
-	tx, err := r.db.Begin(ctx)
-	if err != nil {
-		return "", err
-	}
-	defer tx.Rollback()
-
-	rows, err := tx.Query(ctx, `SELECT current_number FROM invoice_counters WHERE id = 1`)
-	if err != nil {
-		return "", err
-	}
-
-	var next int64
-	if len(rows) == 0 {
-		next = 1
-		_, err = tx.Execute(ctx, `INSERT INTO invoice_counters (id, current_number) VALUES (1, 1)`)
-		if err != nil {
-			return "", err
-		}
-	} else {
-		current, _ := rows[0].Int("current_number")
-		next = current + 1
-		_, err = tx.Execute(ctx, `UPDATE invoice_counters SET current_number = ? WHERE id = 1`, next)
-		if err != nil {
-			return "", err
-		}
-	}
-
-	if err := tx.Commit(); err != nil {
-		return "", err
-	}
-
-	return formatInvoiceNumber(int(next)), nil
-}
-
-func formatInvoiceNumber(n int) string {
-	return fmt.Sprintf("INV-%04d", n)
+func formatInvoiceNumber(orderID int) string {
+	return fmt.Sprintf("INV-%04d", orderID)
 }
 
 func generatePDF(inv Invoice) []byte {

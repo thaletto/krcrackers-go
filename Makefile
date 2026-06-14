@@ -18,7 +18,8 @@ dev-db:              ## Re-export prod D1 into .data/dev.sqlite (requires wrangl
 	@rm -f $(DUMP_FILE) $(DB_FILE)
 	wrangler d1 export $(DB_NAME) --remote --output=$(DUMP_FILE)
 	sqlite3 $(DB_FILE) < $(DUMP_FILE)
-	@echo "Imported $$(sqlite3 $(DB_FILE) "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'") table(s) from $(DB_NAME) into $(DB_FILE)"
+	@go run . migrate up
+	@echo "Imported $$(sqlite3 $(DB_FILE) "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'" | grep -v sqlite | wc -l | tr -d ' ') table(s) from $(DB_NAME) into $(DB_FILE)"
 
 run:                 ## Start the dev server (uses .env / .env.local if present)
 	go run .

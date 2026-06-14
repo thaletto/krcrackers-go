@@ -138,14 +138,14 @@ sequenceDiagram
 
 ## Invoices
 
-PDF generation with sequential numbering.
+PDF generation with order-ID-based numbering.
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
 | `/invoices/{id}` | GET | WithAuth | Download PDF invoice |
 | `/admin/invoices/{id}` | GET | Admin | Download PDF invoice |
 
-Invoice numbers: `INV-0001`, `INV-0002`, etc. Stored in `invoice_counters` table and assigned on first generation.
+Invoice numbers: `INV-0001`, `INV-0002`, etc. Derived from order ID and stored on the order record after first generation.
 
 ## Search
 
