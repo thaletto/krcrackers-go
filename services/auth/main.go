@@ -328,7 +328,7 @@ func (s *Service) me(w http.ResponseWriter, r *http.Request) {
 }
 
 type authResponse struct {
-	User interface{} `json:"user"`
+	User any `json:"user"`
 }
 
 func (s *Service) setTokenCookies(w http.ResponseWriter, accessToken, refreshToken string) {
