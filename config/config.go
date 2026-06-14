@@ -16,16 +16,10 @@ import (
 type Config struct {
 	Database     database.Config
 	Port         string
-	Meilisearch  MeilisearchConfig
 	R2           R2Config
 	JWT          JWTConfig
 	WhatsApp     WhatsAppConfig
 	IsProduction bool
-}
-
-type MeilisearchConfig struct {
-	URL    string
-	APIKey string
 }
 
 type R2Config struct {
@@ -68,10 +62,6 @@ func Load() (*Config, error) {
 	cfg := &Config{
 		Port:         getEnv("PORT", "8080"),
 		IsProduction: appEnv == "production",
-		Meilisearch: MeilisearchConfig{
-			URL:    os.Getenv("MEILISEARCH_URL"),
-			APIKey: os.Getenv("MEILISEARCH_API_KEY"),
-		},
 		R2: R2Config{
 			AccountID:     os.Getenv("R2_ACCOUNT_ID"),
 			AccessKeyID:   os.Getenv("R2_ACCESS_KEY_ID"),

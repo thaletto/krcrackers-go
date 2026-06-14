@@ -17,7 +17,7 @@ graph LR
   handler --> repo[Repository]
   repo --> db[(Database)]
   handler --> bus[eventbus.Bus]
-  bus --> search[Search Subscriber]
+  handler --> resp[HTTP Response]
   bus --> notify[Notification Subscriber]
   handler --> resp[HTTP Response]
 "

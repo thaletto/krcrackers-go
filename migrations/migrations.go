@@ -115,11 +115,26 @@ func parseVersion(name string) (int64, string, error) {
 
 // parseSections splits a migration file into its Up and Down statement lists
 // based on `-- +goose Up` / `-- +goose Down` annotation lines. Statements
-// inside each section are split on `;` boundaries.
+// inside each section are split on `;` boundaries, unless wrapped in
+// `-- +goose StatementBegin` / `-- +goose StatementEnd` markers which treat
+// everything between them as a single statement (needed for triggers, etc.).
 func parseSections(content string) (up, down []string) {
 	section := ""
 	var buf strings.Builder
-	flush := func() {
+	inBlock := false
+	flushStatement := func() {
+		s := strings.TrimSpace(buf.String())
+		if s != "" {
+			switch section {
+			case "up":
+				up = append(up, s)
+			case "down":
+				down = append(down, s)
+			}
+		}
+		buf.Reset()
+	}
+	flushSemicolons := func() {
 		for _, s := range splitStatements(buf.String()) {
 			switch section {
 			case "up":
@@ -134,15 +149,30 @@ func parseSections(content string) (up, down []string) {
 		t := strings.TrimSpace(line)
 		switch {
 		case strings.HasPrefix(t, "-- +goose Up"):
-			flush()
+			if inBlock {
+				flushStatement()
+				inBlock = false
+			} else {
+				flushSemicolons()
+			}
 			section = "up"
 			continue
 		case strings.HasPrefix(t, "-- +goose Down"):
-			flush()
+			if inBlock {
+				flushStatement()
+				inBlock = false
+			} else {
+				flushSemicolons()
+			}
 			section = "down"
 			continue
-		case strings.HasPrefix(t, "-- +goose StatementBegin"),
-			strings.HasPrefix(t, "-- +goose StatementEnd"):
+		case strings.HasPrefix(t, "-- +goose StatementBegin"):
+			flushSemicolons()
+			inBlock = true
+			continue
+		case strings.HasPrefix(t, "-- +goose StatementEnd"):
+			flushStatement()
+			inBlock = false
 			continue
 		}
 		if section != "" {
@@ -150,7 +180,11 @@ func parseSections(content string) (up, down []string) {
 			buf.WriteString("\n")
 		}
 	}
-	flush()
+	if inBlock {
+		flushStatement()
+	} else {
+		flushSemicolons()
+	}
 	return
 }
 

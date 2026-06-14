@@ -103,31 +103,45 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListProductsRespons
 }
 
 func (r *repo) Search(ctx context.Context, filter Filter) (ListProductsResponse, error) {
-	where := []string{"1=1"}
+	useFTS := filter.Query != ""
+
+	var fromClauses []string
+	var whereClauses []string
 	var args []any
 
+	if useFTS {
+		fromClauses = append(fromClauses, "products p")
+		fromClauses = append(fromClauses, "JOIN products_fts ON p.id = products_fts.rowid")
+		whereClauses = append(whereClauses, "products_fts MATCH ?")
+		args = append(args, filter.Query)
+	} else {
+		fromClauses = append(fromClauses, "products p")
+	}
+
 	if filter.Category != "" {
-		where = append(where, "category = ?")
+		whereClauses = append(whereClauses, "p.category = ?")
 		args = append(args, filter.Category)
 	}
 	if filter.Brand != "" {
-		where = append(where, "brand = ?")
+		whereClauses = append(whereClauses, "p.brand = ?")
 		args = append(args, filter.Brand)
 	}
 	if filter.MinPrice > 0 {
-		where = append(where, "price >= ?")
+		whereClauses = append(whereClauses, "p.price >= ?")
 		args = append(args, filter.MinPrice)
 	}
 	if filter.MaxPrice > 0 {
-		where = append(where, "price <= ?")
+		whereClauses = append(whereClauses, "p.price <= ?")
 		args = append(args, filter.MaxPrice)
 	}
-	if filter.Query != "" {
-		where = append(where, "(name LIKE ? OR description LIKE ?)")
-		args = append(args, "%"+filter.Query+"%", "%"+filter.Query+"%")
+
+	fromClause := strings.Join(fromClauses, " ")
+	whereClause := ""
+	if len(whereClauses) > 0 {
+		whereClause = " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	countQuery := "SELECT COUNT(*) AS total FROM products WHERE " + strings.Join(where, " AND ")
+	countQuery := "SELECT COUNT(*) AS total FROM " + fromClause + whereClause
 	countRows, err := r.db.Query(ctx, countQuery, args...)
 	if err != nil {
 		return ListProductsResponse{}, fmt.Errorf("count products: %w", err)
@@ -139,19 +153,17 @@ func (r *repo) Search(ctx context.Context, filter Filter) (ListProductsResponse,
 		}
 	}
 
-	query := `SELECT id, name, price, brand, description, category, image, compare_price
-		FROM products WHERE ` + strings.Join(where, " AND ")
-
+	orderBy := "p.id DESC"
 	switch filter.Sort {
 	case "price_asc":
-		query += " ORDER BY price ASC"
+		orderBy = "p.price ASC"
 	case "price_desc":
-		query += " ORDER BY price DESC"
-	default:
-		query += " ORDER BY id DESC"
+		orderBy = "p.price DESC"
 	}
 
-	var queryArgs = make([]any, len(args))
+	query := "SELECT p.id, p.name, p.price, p.brand, p.description, p.category, p.image, p.compare_price FROM " + fromClause + whereClause + " ORDER BY " + orderBy
+
+	queryArgs := make([]any, len(args))
 	copy(queryArgs, args)
 
 	if filter.Limit > 0 {

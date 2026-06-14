@@ -62,7 +62,7 @@ D1 transactions are not truly atomic. A crash during commit can leave the databa
 | `products` | Product catalog (name, price, brand, category, image) |
 | `orders` | Order headers (status, user, address, totals, payment screenshot) |
 | `order_items` | Line items per order |
-| `products_fts` | Full-text search virtual table (FTS5) |
+| `products_fts` | Full-text search virtual table (FTS5), synced via triggers on products |
 | `users` | User accounts (email, name, phone, auth_provider, role) |
 | `customer_addresses` | Shipping addresses per user |
 | `refresh_tokens` | JWT refresh tokens |

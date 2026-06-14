@@ -22,7 +22,6 @@ import (
 	"github.com/thaletto/krcrackers-go/services/notifications"
 	"github.com/thaletto/krcrackers-go/services/orders"
 	"github.com/thaletto/krcrackers-go/services/products"
-	"github.com/thaletto/krcrackers-go/services/search"
 	"github.com/thaletto/krcrackers-go/services/uploads"
 )
 
@@ -132,16 +131,6 @@ func newHandler(db database.DB, cfg *config.Config) http.Handler {
 	mux := http.NewServeMux()
 
 	bus := eventbus.New()
-
-	if cfg.Meilisearch.URL != "" && cfg.Meilisearch.APIKey != "" {
-		s, err := search.NewService(cfg.Meilisearch.URL, cfg.Meilisearch.APIKey)
-		if err != nil {
-			log.Printf("warning: meilisearch unavailable: %v", err)
-		} else {
-			searchSub := search.NewSubscriber(s)
-			searchSub.RegisterHandlers(bus)
-		}
-	}
 
 	var uploadSvc uploads.Service
 	if cfg.R2.AccessKeyID != "" && cfg.R2.SecretKey != "" && cfg.R2.BucketName != "" {

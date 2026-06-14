@@ -19,7 +19,6 @@ graph TB
     Invoices[Invoices]
   end
   subgraph Internal
-    Search[Search]
     Uploads[Uploads]
     Notify[Notifications]
   end
@@ -28,7 +27,6 @@ graph TB
   Products --> Prods[(products)]
   Orders --> OrdTbl[(orders)]
   Orders --> Items[(order_items)]
-  Products -->|events| Search
   Orders -->|events| Notify
   Orders -->|upload| Uploads
   Invoices --> Orders
@@ -64,7 +62,7 @@ Profile and address CRUD with "set default" logic.
 
 ## Products
 
-Catalog with search, filtering, sorting. Publishes events to event bus.
+Catalog with full-text search via SQLite FTS5, filtering, and sorting.
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
@@ -149,20 +147,19 @@ PDF generation with sequential numbering.
 
 Invoice numbers: `INV-0001`, `INV-0002`, etc. Stored in `invoice_counters` table and assigned on first generation.
 
-## Search (Internal)
+## Search
 
-Meilisearch integration  subscribes to product events, syncs index.
+Full-text product search powered by SQLite FTS5. The `products_fts` virtual table indexes product names and descriptions, kept in sync by database triggers on INSERT, UPDATE, and DELETE.
 
 <Mermaid
   chart="
 flowchart LR
-  P[Products Service] -->|product.created| EB[Event Bus]
-  P -->|product.updated| EB
-  P -->|product.deleted| EB
-  EB --> S[Search Subscriber]
-  S --> M[(Meilisearch)]
+  C[Client] -->|GET /products?q=| P[Products Service]
+  P -->|FTS5 JOIN| FTS[(products_fts)]
 "
 />
+
+Search uses `MATCH` for text queries and falls back to SQL `LIKE` when no query is provided. Filters (category, brand, price range) are applied on the `products` table alongside the FTS join.
 
 ## Notifications (Internal)
 

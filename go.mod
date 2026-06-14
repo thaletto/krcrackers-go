@@ -13,14 +13,12 @@ require (
 	github.com/golang-jwt/jwt/v5 v5.3.1
 	github.com/joho/godotenv v1.5.1
 	github.com/jung-kurt/gofpdf v1.16.2
-	github.com/meilisearch/meilisearch-go v0.36.3
 	github.com/pressly/goose/v3 v3.27.1
 	golang.org/x/crypto v0.53.0
 	modernc.org/sqlite v1.51.0
 )
 
 require (
-	github.com/andybalholm/brotli v1.2.1 // indirect
 	github.com/aws/aws-sdk-go-v2/aws/protocol/eventstream v1.7.13 // indirect
 	github.com/aws/aws-sdk-go-v2/feature/ec2/imds v1.18.29 // indirect
 	github.com/aws/aws-sdk-go-v2/internal/configsources v1.4.29 // indirect

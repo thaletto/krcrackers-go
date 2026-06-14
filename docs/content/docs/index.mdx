@@ -9,7 +9,7 @@ Go-powered e-commerce backend with order lifecycle management, product catalog, 
 ## Features
 
 - **Order Lifecycle**  Pending → Confirmed → Shipped → Delivered / Cancelled
-- **Product Catalog**  CRUD with search, filtering, sorting via Meilisearch
+- **Product Catalog**  CRUD with full-text search (FTS5), filtering, sorting
 - **Auth**  Google OAuth + email/password, JWT + refresh tokens in HttpOnly cookies
 - **Event-Driven**  In-memory pub/sub for cross-service communication
 - **Admin Dashboard**  Order management, stats, product CRUD
@@ -23,7 +23,7 @@ Go-powered e-commerce backend with order lifecycle management, product catalog, 
 |-------|-----------|
 | Language | Go 1.22+ |
 | Database | SQLite (dev) / Cloudflare D1 (prod) |
-| Search | Meilisearch |
+| Search | SQLite FTS5 (built-in) |
 | Storage | Cloudflare R2 (S3-compatible) |
 | Notifications | WhatsApp Cloud API |
 | Auth | JWT (HS256) + Google JWKS |

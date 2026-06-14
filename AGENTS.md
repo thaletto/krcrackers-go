@@ -97,7 +97,7 @@ In-memory pub/sub via `eventbus.Bus`. Publishers fire events, subscribers handle
 
 Events: `product.created`, `product.updated`, `product.deleted`, `order.placed`, `order.confirmed`, `order.shipped`, `order.delivered`, `order.cancelled`.
 
-Subscribers: search (Meilisearch sync), notifications (WhatsApp).
+Subscribers: notifications (WhatsApp).
 
 ## Services
 
@@ -105,9 +105,9 @@ Subscribers: search (Meilisearch sync), notifications (WhatsApp).
 |---------|---------|------|-------------|
 | Auth | `services/auth/` | Public + middleware | Register, login, Google login, refresh, logout, /me |
 | Customers | `services/customers/` | WithAuth | Profile CRUD, address CRUD with set-default |
-| Products | `services/products/` | Public reads, admin writes | CRUD, search/filter/sort, event publishing |
+| Products | `services/products/` | Public reads, admin writes | CRUD, FTS5 search/filter/sort, event publishing |
 | Orders | `services/orders/` | Public + auth + admin | Checkout, customer orders, admin management, dashboard |
-| Search | `services/search/` | None (internal) | Meilisearch sync via event subscriber |
+| Search | *(built into products)* | N/A | SQLite FTS5 full-text search via `products_fts` table |
 | Uploads | `services/uploads/` | None (internal) | R2 file uploads for payment screenshots |
 | Notifications | `services/notifications/` | None (internal) | WhatsApp Cloud API via event subscriber |
 | Invoices | `services/invoices/` | WithAuth | On-demand PDF invoice generation |
@@ -122,7 +122,7 @@ make migrate-down     # rollback latest
 make migrate-status   # show applied/pending
 ```
 
-New migration: add `migrations/NNNN_name.sql` (higher number than current max) with goose-style `-- +goose Up` / `-- +goose Down` sections. The runner embeds `*.sql` via `//go:embed`.
+New migration: add `migrations/NNNN_name.sql` (higher number than current max) with goose-style `-- +goose Up` / `-- +goose Down` sections. The runner embeds `*.sql` via `//go:embed`. Use `-- +goose StatementBegin` / `-- +goose StatementEnd` around statements containing semicolons (e.g. triggers).
 
 ## Env files
 

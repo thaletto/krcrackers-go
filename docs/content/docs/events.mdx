@@ -13,7 +13,6 @@ In-memory pub/sub decouples services for cross-cutting concerns. Publishers fire
 flowchart LR
   P[Products Service] -->|publish| EB[eventbus.Bus]
   O[Orders Service] -->|publish| EB
-  EB -->|subscribe| S[Search Subscriber\nMeilisearch sync]
   EB -->|subscribe| N[Notification Subscriber\nWhatsApp]
 "
 />
@@ -22,9 +21,9 @@ flowchart LR
 
 | Event | Publisher | Subscribers |
 |-------|-----------|-------------|
-| `product.created` | Products | Search (index to Meilisearch) |
-| `product.updated` | Products | Search (re-index) |
-| `product.deleted` | Products | Search (remove from index) |
+| `product.created` | Products | *(available for future subscribers)* |
+| `product.updated` | Products | *(available for future subscribers)* |
+| `product.deleted` | Products | *(available for future subscribers)* |
 | `order.placed` | Orders | Notifications (WhatsApp) |
 | `order.confirmed` | Orders | Notifications (WhatsApp) |
 | `order.shipped` | Orders | Notifications (WhatsApp) |
