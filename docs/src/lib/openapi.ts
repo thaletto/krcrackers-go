@@ -1,6 +1,6 @@
-import { createOpenAPI } from 'fumadocs-openapi/server';
+import { createOpenAPI } from "fumadocs-openapi/server";
 
 export const openapi = createOpenAPI({
-  input: ['./openapi/openapi.json'],
-  proxyUrl: '/api/proxy',
+	input: ["./openapi/openapi.json"],
+	proxyUrl: "/api/proxy",
 });
