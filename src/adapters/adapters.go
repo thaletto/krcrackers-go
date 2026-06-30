@@ -5,9 +5,9 @@ package adapters
 import (
 	"context"
 
-	"github.com/thaletto/krcrackers-go/database"
-	"github.com/thaletto/krcrackers-go/services/auth"
-	"github.com/thaletto/krcrackers-go/services/orders"
+	"github.com/thaletto/krcrackers-go/src/database"
+	"github.com/thaletto/krcrackers-go/src/services/auth"
+	"github.com/thaletto/krcrackers-go/src/services/orders"
 )
 
 // UserProviderAdapter wraps auth.Repository to implement orders.UserProvider,

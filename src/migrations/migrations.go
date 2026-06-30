@@ -35,7 +35,7 @@ import (
 
 	"github.com/pressly/goose/v3"
 
-	"github.com/thaletto/krcrackers-go/database"
+	"github.com/thaletto/krcrackers-go/src/database"
 )
 
 //go:embed *.sql

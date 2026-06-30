@@ -1,3 +1,7 @@
+// Package auth provides HTTP middleware for authenticating and authorizing
+// requests via JWT cookies or Authorization headers. The middleware injects
+// the authenticated user into the request context under the context key
+// defined in the services/auth package.
 package auth
 
 import (
@@ -5,17 +9,9 @@ import (
 	"net/http"
 	"strings"
 
-	"github.com/thaletto/krcrackers-go/server"
+	"github.com/thaletto/krcrackers-go/src/server"
+	"github.com/thaletto/krcrackers-go/src/services/auth"
 )
-
-type contextKey string
-
-const UserContextKey contextKey = "user"
-
-type ContextUser struct {
-	ID   int
-	Role string
-}
 
 // WithAuth returns middleware that validates the JWT access token from
 // cookies or Authorization header and injects the user into context.
@@ -27,13 +23,13 @@ func WithAuth(next http.Handler) http.Handler {
 			return
 		}
 
-		claims, err := ValidateJWT(token)
+		claims, err := auth.ValidateJWT(token)
 		if err != nil {
 			server.WriteError(w, http.StatusUnauthorized, "invalid token")
 			return
 		}
 
-		ctx := context.WithValue(r.Context(), UserContextKey, &ContextUser{
+		ctx := context.WithValue(r.Context(), auth.UserContextKey, &auth.ContextUser{
 			ID:   claims.UserID,
 			Role: claims.Role,
 		})
@@ -45,7 +41,7 @@ func WithAuth(next http.Handler) http.Handler {
 // "admin" role. Must be chained after WithAuth.
 func WithAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		user, ok := r.Context().Value(UserContextKey).(*ContextUser)
+		user, ok := r.Context().Value(auth.UserContextKey).(*auth.ContextUser)
 		if !ok || user.Role != "admin" {
 			server.WriteError(w, http.StatusForbidden, "forbidden")
 			return
@@ -61,8 +57,8 @@ func WithOptionalAuth(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		token := extractToken(r)
 		if token != "" {
-			if claims, err := ValidateJWT(token); err == nil {
-				ctx := context.WithValue(r.Context(), UserContextKey, &ContextUser{
+			if claims, err := auth.ValidateJWT(token); err == nil {
+				ctx := context.WithValue(r.Context(), auth.UserContextKey, &auth.ContextUser{
 					ID:   claims.UserID,
 					Role: claims.Role,
 				})
@@ -73,20 +69,13 @@ func WithOptionalAuth(next http.Handler) http.Handler {
 	})
 }
 
-// GetUser extracts the authenticated user from the request context.
-// Returns nil if the request is not authenticated.
-func GetUser(r *http.Request) *ContextUser {
-	u, _ := r.Context().Value(UserContextKey).(*ContextUser)
-	return u
-}
-
 func extractToken(r *http.Request) string {
 	if c, err := r.Cookie("access_token"); err == nil {
 		return c.Value
 	}
-	auth := r.Header.Get("Authorization")
-	if strings.HasPrefix(auth, "Bearer ") {
-		return strings.TrimPrefix(auth, "Bearer ")
+	authHeader := r.Header.Get("Authorization")
+	if strings.HasPrefix(authHeader, "Bearer ") {
+		return strings.TrimPrefix(authHeader, "Bearer ")
 	}
 	return ""
 }

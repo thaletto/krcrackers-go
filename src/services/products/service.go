@@ -5,22 +5,38 @@ import (
 	"fmt"
 	"strings"
 
-	apperrors "github.com/thaletto/krcrackers-go/errors"
-	"github.com/thaletto/krcrackers-go/database"
+	apperrors "github.com/thaletto/krcrackers-go/src/errors"
+	"github.com/thaletto/krcrackers-go/src/database"
+	"github.com/thaletto/krcrackers-go/src/eventbus"
+	"github.com/thaletto/krcrackers-go/src/eventbus/events"
 )
 
-// Repository defines the data access interface for products.
-type Repository interface {
-	Create(ctx context.Context, input ProductInput) (Product, error)
-	List(ctx context.Context, limit, offset int) (ListProductsResponse, error)
-	Search(ctx context.Context, filter Filter) (ListProductsResponse, error)
-	Get(ctx context.Context, id int) (Product, error)
-	Update(ctx context.Context, id int, input ProductInput) (Product, error)
-	Delete(ctx context.Context, id int) error
-	GetByIDs(ctx context.Context, ids []int) ([]Product, error)
+type ProductFields struct {
+	Name         string   `json:"name"`
+	Price        float64  `json:"price"`
+	Brand        *string  `json:"brand,omitempty"`
+	Description  *string  `json:"description,omitempty"`
+	Category     string   `json:"category"`
+	Image        *string  `json:"image,omitempty"`
+	ComparePrice float64  `json:"comparePrice"`
 }
 
-// Filter defines search and filtering parameters for product queries.
+type Product struct {
+	ID int `json:"id"`
+	ProductFields
+}
+
+type ProductInput struct {
+	ProductFields
+}
+
+type ListProductsResponse struct {
+	Items  []Product `json:"items"`
+	Total  int       `json:"total"`
+	Limit  *int      `json:"limit,omitempty"`
+	Offset *int      `json:"offset,omitempty"`
+}
+
 type Filter struct {
 	Query    string
 	Category string
@@ -32,28 +48,33 @@ type Filter struct {
 	Offset   int
 }
 
-type repo struct {
-	db database.DB
+type Service struct {
+	db  database.DB
+	bus eventbus.Bus
 }
 
-// NewRepository returns a new products repository backed by the given database.
-func NewRepository(db database.DB) Repository {
-	return &repo{db: db}
+func NewService(db database.DB, bus eventbus.Bus) *Service {
+	return &Service{db: db, bus: bus}
 }
 
-func (r *repo) Create(ctx context.Context, input ProductInput) (Product, error) {
-	res, err := r.db.Execute(ctx, `
+func (s *Service) Create(ctx context.Context, input ProductInput) (Product, error) {
+	if err := validateProductInput(input); err != nil {
+		return Product{}, err
+	}
+	res, err := s.db.Execute(ctx, `
 		INSERT INTO products (name, price, brand, description, category, image, compare_price)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
 	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice)
 	if err != nil {
 		return Product{}, fmt.Errorf("insert product: %w", err)
 	}
-	return productFromInput(int(res.LastInsertID), input), nil
+	product := productFromInput(int(res.LastInsertID), input)
+	s.publishProductEvent(ctx, events.ProductCreated, product)
+	return product, nil
 }
 
-func (r *repo) List(ctx context.Context, limit, offset int) (ListProductsResponse, error) {
-	countRows, err := r.db.Query(ctx, `SELECT COUNT(*) AS total FROM products`)
+func (s *Service) List(ctx context.Context, limit, offset int) (ListProductsResponse, error) {
+	countRows, err := s.db.Query(ctx, `SELECT COUNT(*) AS total FROM products`)
 	if err != nil {
 		return ListProductsResponse{}, fmt.Errorf("count products: %w", err)
 	}
@@ -75,7 +96,7 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListProductsRespons
 		queryArgs = append(queryArgs, limit, offset)
 	}
 
-	rows, err := r.db.Query(ctx, query, queryArgs...)
+	rows, err := s.db.Query(ctx, query, queryArgs...)
 	if err != nil {
 		return ListProductsResponse{}, fmt.Errorf("list products: %w", err)
 	}
@@ -102,7 +123,7 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListProductsRespons
 	}, nil
 }
 
-func (r *repo) Search(ctx context.Context, filter Filter) (ListProductsResponse, error) {
+func (s *Service) Search(ctx context.Context, filter Filter) (ListProductsResponse, error) {
 	useFTS := filter.Query != ""
 
 	var fromClauses []string
@@ -142,7 +163,7 @@ func (r *repo) Search(ctx context.Context, filter Filter) (ListProductsResponse,
 	}
 
 	countQuery := "SELECT COUNT(*) AS total FROM " + fromClause + whereClause
-	countRows, err := r.db.Query(ctx, countQuery, args...)
+	countRows, err := s.db.Query(ctx, countQuery, args...)
 	if err != nil {
 		return ListProductsResponse{}, fmt.Errorf("count products: %w", err)
 	}
@@ -171,7 +192,7 @@ func (r *repo) Search(ctx context.Context, filter Filter) (ListProductsResponse,
 		queryArgs = append(queryArgs, filter.Limit, filter.Offset)
 	}
 
-	rows, err := r.db.Query(ctx, query, queryArgs...)
+	rows, err := s.db.Query(ctx, query, queryArgs...)
 	if err != nil {
 		return ListProductsResponse{}, fmt.Errorf("search products: %w", err)
 	}
@@ -198,8 +219,8 @@ func (r *repo) Search(ctx context.Context, filter Filter) (ListProductsResponse,
 	}, nil
 }
 
-func (r *repo) Get(ctx context.Context, id int) (Product, error) {
-	rows, err := r.db.Query(ctx, `
+func (s *Service) Get(ctx context.Context, id int) (Product, error) {
+	rows, err := s.db.Query(ctx, `
 		SELECT id, name, price, brand, description, category, image, compare_price
 		FROM products WHERE id = ?
 	`, id)
@@ -212,8 +233,11 @@ func (r *repo) Get(ctx context.Context, id int) (Product, error) {
 	return rowToProduct(rows[0])
 }
 
-func (r *repo) Update(ctx context.Context, id int, input ProductInput) (Product, error) {
-	res, err := r.db.Execute(ctx, `
+func (s *Service) Update(ctx context.Context, id int, input ProductInput) (Product, error) {
+	if err := validateProductInput(input); err != nil {
+		return Product{}, err
+	}
+	res, err := s.db.Execute(ctx, `
 		UPDATE products
 		SET name = ?, price = ?, brand = ?, description = ?, category = ?, image = ?, compare_price = ?
 		WHERE id = ?
@@ -224,21 +248,24 @@ func (r *repo) Update(ctx context.Context, id int, input ProductInput) (Product,
 	if res.RowsAffected == 0 {
 		return Product{}, fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
 	}
-	return productFromInput(id, input), nil
+	product := productFromInput(id, input)
+	s.publishProductEvent(ctx, events.ProductUpdated, product)
+	return product, nil
 }
 
-func (r *repo) Delete(ctx context.Context, id int) error {
-	res, err := r.db.Execute(ctx, `DELETE FROM products WHERE id = ?`, id)
+func (s *Service) Delete(ctx context.Context, id int) error {
+	res, err := s.db.Execute(ctx, `DELETE FROM products WHERE id = ?`, id)
 	if err != nil {
 		return fmt.Errorf("delete product %d: %w", id, err)
 	}
 	if res.RowsAffected == 0 {
 		return fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
 	}
+	s.publishProductDeleteEvent(ctx, id)
 	return nil
 }
 
-func (r *repo) GetByIDs(ctx context.Context, ids []int) ([]Product, error) {
+func (s *Service) GetByIDs(ctx context.Context, ids []int) ([]Product, error) {
 	if len(ids) == 0 {
 		return nil, nil
 	}
@@ -253,7 +280,7 @@ func (r *repo) GetByIDs(ctx context.Context, ids []int) ([]Product, error) {
 		FROM products WHERE id IN (%s)
 	`, strings.Join(placeholders, ","))
 
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := s.db.Query(ctx, query, args...)
 	if err != nil {
 		return nil, fmt.Errorf("get products by ids: %w", err)
 	}
@@ -266,6 +293,60 @@ func (r *repo) GetByIDs(ctx context.Context, ids []int) ([]Product, error) {
 		products = append(products, p)
 	}
 	return products, nil
+}
+
+func (s *Service) publishProductEvent(ctx context.Context, eventName string, p Product) {
+	if s.bus == nil {
+		return
+	}
+	brand := ""
+	if p.Brand != nil {
+		brand = *p.Brand
+	}
+	desc := ""
+	if p.Description != nil {
+		desc = *p.Description
+	}
+	img := ""
+	if p.Image != nil {
+		img = *p.Image
+	}
+	s.bus.Publish(ctx, eventbus.Event{
+		Name: eventName,
+		Payload: events.ProductEvent{
+			ID:           p.ID,
+			Name:         p.Name,
+			Description:  desc,
+			Price:        p.Price,
+			Brand:        brand,
+			Category:     p.Category,
+			Image:        img,
+			ComparePrice: p.ComparePrice,
+		},
+	})
+}
+
+func (s *Service) publishProductDeleteEvent(ctx context.Context, id int) {
+	if s.bus == nil {
+		return
+	}
+	s.bus.Publish(ctx, eventbus.Event{
+		Name:    events.ProductDeleted,
+		Payload: events.ProductEvent{ID: id},
+	})
+}
+
+func validateProductInput(p ProductInput) error {
+	if p.Name == "" {
+		return fmt.Errorf("name is required")
+	}
+	if p.Price < 0 {
+		return fmt.Errorf("price must be >= 0")
+	}
+	if p.Category == "" {
+		return fmt.Errorf("category is required")
+	}
+	return nil
 }
 
 func productFromInput(id int, b ProductInput) Product {

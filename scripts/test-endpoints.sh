@@ -111,7 +111,7 @@ echo ""
 
 # Kill any existing server processes
 echo -e "${YELLOW}Stopping any existing server...${NC}"
-pkill -f "go run ." 2>/dev/null || true
+pkill -f "go run ./src" 2>/dev/null || true
 pkill -f "krcracker" 2>/dev/null || true
 sleep 2
 lsof -ti:8080 | xargs kill -9 2>/dev/null || true
@@ -121,7 +121,7 @@ sleep 1
 echo -e "${YELLOW}Starting server...${NC}"
 rm -rf .data/
 mkdir -p .data
-JWT_SECRET="test-secret-key-for-testing-only" nohup go run . > /tmp/test-server.log 2>&1 &
+JWT_SECRET="test-secret-key-for-testing-only" nohup go run ./src > /tmp/test-server.log 2>&1 &
 SERVER_PID=$!
 sleep 3
 
@@ -136,7 +136,7 @@ echo ""
 
 # Run migrations
 echo -e "${YELLOW}Running migrations...${NC}"
-JWT_SECRET="test-secret-key-for-testing-only" go run . migrate up 2>&1 | grep -v "^$" || true
+JWT_SECRET="test-secret-key-for-testing-only" go run ./src migrate up 2>&1 | grep -v "^$" || true
 echo -e "${GREEN}Migrations complete${NC}"
 echo ""
 

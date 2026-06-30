@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/thaletto/krcrackers-go/database"
-	"github.com/thaletto/krcrackers-go/services/auth"
+	"github.com/thaletto/krcrackers-go/src/database"
+	"github.com/thaletto/krcrackers-go/src/services/auth"
 )
 
 // Address represents a customer shipping address.
@@ -158,7 +158,7 @@ func (r *repo) DeleteAddress(ctx context.Context, userID, addressID int) error {
 		return err
 	}
 	if res.RowsAffected == 0 {
-		return errNotFound
+		return ErrNotFound
 	}
 	return nil
 }
@@ -180,12 +180,12 @@ func (r *repo) SetDefaultAddress(ctx context.Context, userID, addressID int) err
 	}
 	if res.RowsAffected == 0 {
 		tx.Rollback()
-		return errNotFound
+		return ErrNotFound
 	}
 	return tx.Commit()
 }
 
-var errNotFound = fmt.Errorf("not found")
+var ErrNotFound = fmt.Errorf("not found")
 
 func rowToUser(row database.Row) (auth.User, error) {
 	id, err := row.Int("id")

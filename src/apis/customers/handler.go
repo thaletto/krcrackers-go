@@ -1,5 +1,6 @@
-// Package customers provides customer profile and address management endpoints.
-// All routes require authentication via the auth middleware.
+// Package customers provides the HTTP handlers for customer profile and
+// address management. Handlers are thin: decode the request, call into
+// services/customers, and encode the response.
 package customers
 
 import (
@@ -8,35 +9,31 @@ import (
 	"net/http"
 	"strconv"
 
-	"github.com/thaletto/krcrackers-go/server"
-	"github.com/thaletto/krcrackers-go/services/auth"
+	authapi "github.com/thaletto/krcrackers-go/src/apis/auth"
+	"github.com/thaletto/krcrackers-go/src/server"
+	"github.com/thaletto/krcrackers-go/src/services/auth"
+	svc "github.com/thaletto/krcrackers-go/src/services/customers"
 )
 
-// Service handles customer profile and address HTTP endpoints.
-type Service struct {
-	repo Repository
+// Handler binds the customer HTTP routes to a services/customers.Service.
+type Handler struct {
+	svc *svc.Service
 }
 
-// ListAddressesResponse is the response for listing customer addresses.
-type ListAddressesResponse struct {
-	Items  []Address `json:"items"`
-	Total  int       `json:"total"`
+// NewHandler creates a new customers HTTP handler.
+func NewHandler(service *svc.Service) *Handler {
+	return &Handler{svc: service}
 }
 
-// NewService creates a new customers service.
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
-}
-
-// RegisterRoutes registers all customer endpoints on the given mux.
-func (s *Service) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("GET /customers/profile", auth.WithAuth(http.HandlerFunc(s.getProfile)).ServeHTTP)
-	mux.HandleFunc("PUT /customers/profile", auth.WithAuth(http.HandlerFunc(s.updateProfile)).ServeHTTP)
-	mux.HandleFunc("GET /customers/addresses", auth.WithAuth(http.HandlerFunc(s.listAddresses)).ServeHTTP)
-	mux.HandleFunc("POST /customers/addresses", auth.WithAuth(http.HandlerFunc(s.createAddress)).ServeHTTP)
-	mux.HandleFunc("PUT /customers/addresses/{id}", auth.WithAuth(http.HandlerFunc(s.updateAddress)).ServeHTTP)
-	mux.HandleFunc("DELETE /customers/addresses/{id}", auth.WithAuth(http.HandlerFunc(s.deleteAddress)).ServeHTTP)
-	mux.HandleFunc("PUT /customers/addresses/{id}/default", auth.WithAuth(http.HandlerFunc(s.setDefaultAddress)).ServeHTTP)
+// RegisterRoutes wires all customer endpoints on the given mux.
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+	mux.HandleFunc("GET /customers/profile", authapi.WithAuth(http.HandlerFunc(h.getProfile)).ServeHTTP)
+	mux.HandleFunc("PUT /customers/profile", authapi.WithAuth(http.HandlerFunc(h.updateProfile)).ServeHTTP)
+	mux.HandleFunc("GET /customers/addresses", authapi.WithAuth(http.HandlerFunc(h.listAddresses)).ServeHTTP)
+	mux.HandleFunc("POST /customers/addresses", authapi.WithAuth(http.HandlerFunc(h.createAddress)).ServeHTTP)
+	mux.HandleFunc("PUT /customers/addresses/{id}", authapi.WithAuth(http.HandlerFunc(h.updateAddress)).ServeHTTP)
+	mux.HandleFunc("DELETE /customers/addresses/{id}", authapi.WithAuth(http.HandlerFunc(h.deleteAddress)).ServeHTTP)
+	mux.HandleFunc("PUT /customers/addresses/{id}/default", authapi.WithAuth(http.HandlerFunc(h.setDefaultAddress)).ServeHTTP)
 }
 
 // GetProfile godoc
@@ -49,11 +46,15 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 // @Failure      401    {object}  server.ErrorResponse
 // @Failure      404    {object}  server.ErrorResponse
 // @Router       /customers/profile [get]
-func (s *Service) getProfile(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) getProfile(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
-	profile, err := s.repo.GetProfile(r.Context(), user.ID)
-	if err != nil || profile.ID == 0 {
-		server.WriteError(w, http.StatusNotFound, "profile not found")
+	profile, err := h.svc.GetProfile(r.Context(), user.ID)
+	if err != nil {
+		if errors.Is(err, svc.ErrNotFound) {
+			server.WriteError(w, http.StatusNotFound, "profile not found")
+			return
+		}
+		server.WriteError(w, http.StatusInternalServerError, "failed to get profile")
 		return
 	}
 	server.WriteJSON(w, http.StatusOK, profile)
@@ -71,7 +72,7 @@ func (s *Service) getProfile(w http.ResponseWriter, r *http.Request) {
 // @Failure      400    {object}  server.ErrorResponse
 // @Failure      401    {object}  server.ErrorResponse
 // @Router       /customers/profile [put]
-func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	var input struct {
 		Name  string `json:"name"`
@@ -82,7 +83,7 @@ func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	profile, err := s.repo.UpdateProfile(r.Context(), user.ID, input.Name, input.Phone)
+	profile, err := h.svc.UpdateProfile(r.Context(), user.ID, input.Name, input.Phone)
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "failed to update profile")
 		return
@@ -96,17 +97,17 @@ func (s *Service) updateProfile(w http.ResponseWriter, r *http.Request) {
 // @Tags         customers
 // @Produce      json
 // @Security     cookieAuth
-// @Success      200    {object}  ListAddressesResponse
+// @Success      200    {object}  svc.ListAddressesResponse
 // @Failure      401    {object}  server.ErrorResponse
 // @Router       /customers/addresses [get]
-func (s *Service) listAddresses(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) listAddresses(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
-	addresses, err := s.repo.ListAddresses(r.Context(), user.ID)
+	addresses, err := h.svc.ListAddresses(r.Context(), user.ID)
 	if err != nil {
 		server.WriteError(w, http.StatusInternalServerError, "failed to list addresses")
 		return
 	}
-	server.WriteJSON(w, http.StatusOK, map[string]any{"items": addresses, "total": len(addresses)})
+	server.WriteJSON(w, http.StatusOK, svc.ListAddressesResponse{Items: addresses, Total: len(addresses)})
 }
 
 // CreateAddress godoc
@@ -116,26 +117,26 @@ func (s *Service) listAddresses(w http.ResponseWriter, r *http.Request) {
 // @Accept       json
 // @Produce      json
 // @Security     cookieAuth
-// @Param        input  body      AddressInput  true  "Address details"
-// @Success      201    {object}  Address
+// @Param        input  body      svc.AddressInput  true  "Address details"
+// @Success      201    {object}  svc.Address
 // @Failure      400    {object}  server.ErrorResponse
 // @Failure      401    {object}  server.ErrorResponse
 // @Failure      422    {object}  server.ErrorResponse
 // @Router       /customers/addresses [post]
-func (s *Service) createAddress(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) createAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
-	var input AddressInput
+	var input svc.AddressInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
-	if input.Street == "" || input.City == "" || input.State == "" || input.Pincode == "" {
-		server.WriteError(w, http.StatusUnprocessableEntity, "street, city, state, and pincode are required")
-		return
-	}
 
-	addr, err := s.repo.CreateAddress(r.Context(), user.ID, input)
+	addr, err := h.svc.CreateAddress(r.Context(), user.ID, input)
 	if err != nil {
+		if err.Error() == "street, city, state, and pincode are required" {
+			server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		server.WriteError(w, http.StatusInternalServerError, "failed to create address")
 		return
 	}
@@ -149,13 +150,13 @@ func (s *Service) createAddress(w http.ResponseWriter, r *http.Request) {
 // @Accept       json
 // @Produce      json
 // @Security     cookieAuth
-// @Param        id     path      int           true  "Address ID"
-// @Param        input  body      AddressInput  true  "Address details"
-// @Success      200    {object}  Address
+// @Param        id     path      int              true  "Address ID"
+// @Param        input  body      svc.AddressInput true  "Address details"
+// @Success      200    {object}  svc.Address
 // @Failure      400    {object}  server.ErrorResponse
 // @Failure      401    {object}  server.ErrorResponse
 // @Router       /customers/addresses/{id} [put]
-func (s *Service) updateAddress(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) updateAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -163,14 +164,18 @@ func (s *Service) updateAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var input AddressInput
+	var input svc.AddressInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
 
-	addr, err := s.repo.UpdateAddress(r.Context(), user.ID, id, input)
+	addr, err := h.svc.UpdateAddress(r.Context(), user.ID, id, input)
 	if err != nil {
+		if err.Error() == "street, city, state, and pincode are required" {
+			server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+			return
+		}
 		server.WriteError(w, http.StatusInternalServerError, "failed to update address")
 		return
 	}
@@ -188,7 +193,7 @@ func (s *Service) updateAddress(w http.ResponseWriter, r *http.Request) {
 // @Failure      401    {object}  server.ErrorResponse
 // @Failure      404    {object}  server.ErrorResponse
 // @Router       /customers/addresses/{id} [delete]
-func (s *Service) deleteAddress(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) deleteAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -196,8 +201,8 @@ func (s *Service) deleteAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.repo.DeleteAddress(r.Context(), user.ID, id); err != nil {
-		if errors.Is(err, errNotFound) {
+	if err := h.svc.DeleteAddress(r.Context(), user.ID, id); err != nil {
+		if errors.Is(err, svc.ErrNotFound) {
 			server.WriteError(w, http.StatusNotFound, "address not found")
 			return
 		}
@@ -219,7 +224,7 @@ func (s *Service) deleteAddress(w http.ResponseWriter, r *http.Request) {
 // @Failure      401    {object}  server.ErrorResponse
 // @Failure      404    {object}  server.ErrorResponse
 // @Router       /customers/addresses/{id}/default [put]
-func (s *Service) setDefaultAddress(w http.ResponseWriter, r *http.Request) {
+func (h *Handler) setDefaultAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -227,13 +232,13 @@ func (s *Service) setDefaultAddress(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := s.repo.SetDefaultAddress(r.Context(), user.ID, id); err != nil {
-		if errors.Is(err, errNotFound) {
+	if err := h.svc.SetDefaultAddress(r.Context(), user.ID, id); err != nil {
+		if errors.Is(err, svc.ErrNotFound) {
 			server.WriteError(w, http.StatusNotFound, "address not found")
 			return
 		}
 		server.WriteError(w, http.StatusInternalServerError, "failed to set default address")
 		return
 	}
-	server.WriteJSON(w, http.StatusOK, map[string]string{"status": "ok"})
+	server.WriteJSON(w, http.StatusOK, server.StatusResponse{Status: "ok"})
 }

@@ -23,7 +23,7 @@ dev-db:              ## Re-export prod D1 into .data/dev.sqlite (requires wrangl
 	@echo "Imported $$(sqlite3 $(DB_FILE) "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'" | grep -v sqlite | wc -l | tr -d ' ') table(s) from $(DB_NAME) into $(DB_FILE)"
 
 run:                 ## Start the dev server (uses .env / .env.local if present)
-	go run .
+	go run ./src
 
 dev: dev-db run      ## First-time / data-refresh: re-export then start
 
@@ -38,19 +38,19 @@ watch: dev-db        ## Hot reload on .go changes (requires `go install github.c
 	$(AIR)
 
 migrate-up:          ## Apply pending migrations to the configured database (dev or prod)
-	go run . migrate up
+	go run ./src migrate up
 
 migrate-down:        ## Roll back the most recent migration
-	go run . migrate down
+	go run ./src migrate down
 
 migrate-status:      ## Show applied and pending migrations
-	go run . migrate status
+	go run ./src migrate status
 
 build:               ## Compile all packages
 	go build ./...
 
 build-lambda:        ## Build binary for AWS Lambda (linux/arm64)
-	GOOS=linux GOARCH=arm64 go build -o bootstrap ./cmd/lambda
+	GOOS=linux GOARCH=arm64 go build -o bootstrap ./src/cmd/lambda
 	zip lambda.zip bootstrap
 
 deploy-lambda: build-lambda deploy-env  ## Deploy to AWS Lambda (code + env)

@@ -9,7 +9,7 @@ import (
 
 	"github.com/joho/godotenv"
 
-	"github.com/thaletto/krcrackers-go/database"
+	"github.com/thaletto/krcrackers-go/src/database"
 )
 
 // Config holds all application configuration values.

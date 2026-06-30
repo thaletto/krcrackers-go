@@ -3,8 +3,8 @@ package notifications
 import (
 	"context"
 
-	"github.com/thaletto/krcrackers-go/eventbus"
-	"github.com/thaletto/krcrackers-go/eventbus/events"
+	"github.com/thaletto/krcrackers-go/src/eventbus"
+	"github.com/thaletto/krcrackers-go/src/eventbus/events"
 )
 
 // Subscriber listens to order lifecycle events and sends WhatsApp notifications.
