@@ -89,7 +89,7 @@ func (s *Service) RegisterRoutes(mux *http.ServeMux) {
 func (s *Service) handler(w http.ResponseWriter, r *http.Request) { ... }
 ```
 
-Handler wiring lives in `main.go` and `cmd/lambda/main.go`. The `server` package provides shared HTTP helpers (`WriteJSON`, `WriteError`, `WithLogging`) used by both entry points and services.
+Handler wiring lives in `src/main.go` and `src/cmd/lambda/main.go`. The `server` package provides shared HTTP helpers (`WriteJSON`, `WriteError`, `WithLogging`) used by both entry points and services.
 
 ## Event bus
 
@@ -103,14 +103,14 @@ Subscribers: notifications (WhatsApp).
 
 | Service | Package | Auth | Description |
 |---------|---------|------|-------------|
-| Auth | `services/auth/` | Public + middleware | Register, login, Google login, refresh, logout, /me |
-| Customers | `services/customers/` | WithAuth | Profile CRUD, address CRUD with set-default |
-| Products | `services/products/` | Public reads, admin writes | CRUD, FTS5 search/filter/sort, event publishing |
-| Orders | `services/orders/` | Public + auth + admin | Checkout, customer orders, admin management, dashboard |
+| Auth | `src/services/auth/` | Public + middleware | Register, login, Google login, refresh, logout, /me |
+| Customers | `src/services/customers/` | WithAuth | Profile CRUD, address CRUD with set-default |
+| Products | `src/services/products/` | Public reads, admin writes | CRUD, FTS5 search/filter/sort, event publishing |
+| Orders | `src/services/orders/` | Public + auth + admin | Checkout, customer orders, admin management, dashboard |
 | Search | *(built into products)* | N/A | SQLite FTS5 full-text search via `products_fts` table |
-| Uploads | `services/uploads/` | None (internal) | R2 file uploads for payment screenshots |
-| Notifications | `services/notifications/` | None (internal) | WhatsApp Cloud API via event subscriber |
-| Invoices | `services/invoices/` | WithAuth | On-demand PDF invoice generation |
+| Uploads | `src/services/uploads/` | None (internal) | R2 file uploads for payment screenshots |
+| Notifications | `src/services/notifications/` | None (internal) | WhatsApp Cloud API via event subscriber |
+| Invoices | `src/services/invoices/` | WithAuth | On-demand PDF invoice generation |
 
 ## Migrations
 
@@ -122,7 +122,7 @@ make migrate-down     # rollback latest
 make migrate-status   # show applied/pending
 ```
 
-New migration: add `migrations/NNNN_name.sql` (higher number than current max) with goose-style `-- +goose Up` / `-- +goose Down` sections. The runner embeds `*.sql` via `//go:embed`. Use `-- +goose StatementBegin` / `-- +goose StatementEnd` around statements containing semicolons (e.g. triggers).
+New migration: add `src/migrations/NNNN_name.sql` (higher number than current max) with goose-style `-- +goose Up` / `-- +goose Down` sections. The runner embeds `*.sql` via `//go:embed`. Use `-- +goose StatementBegin` / `-- +goose StatementEnd` around statements containing semicolons (e.g. triggers).
 
 ## Env files
 
@@ -132,16 +132,18 @@ New migration: add `migrations/NNNN_name.sql` (higher number than current max) w
 
 There are zero `_test.go` files. `go test ./...` is a no-op. If you add tests, there is no test framework or fixture setup to worry about - just standard `testing` + `go test`.
 
+**Test location convention:** all `_test.go` files live **outside `src/`**. Put every test under `tests/...`, mirroring the package layout one level deeper. Example: tests for `src/services/auth/` go in `tests/services/auth/`. Use external test packages (`package <name>_test`) so the blackbox boundary stays intact. Never create `_test.go` files anywhere under `src/`.
+
 ## Documentation
 
 Use `go doc` to look up types, functions, and packages - it's faster and more reliable than reading source files:
 
 ```sh
-go doc database.DB            # interface
-go doc database.Row           # typed row accessor
-go doc products.Product       # response struct
-go doc eventbus.Bus           # event bus interface
-go doc auth.WithAuth          # auth middleware
+go doc src/database.DB            # interface
+go doc src/database.Row           # typed row accessor
+go doc src/services/products.Product # response struct
+go doc src/eventbus.Bus           # event bus interface
+go doc src/services/auth.WithAuth # auth middleware
 ```
 
 HTML docs: open `docs/index.html` in a browser.
