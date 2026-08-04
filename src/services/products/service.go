@@ -5,8 +5,8 @@ import (
 	"fmt"
 	"strings"
 
-	apperrors "github.com/thaletto/krcrackers-go/src/errors"
 	"github.com/thaletto/krcrackers-go/src/database"
+	apperrors "github.com/thaletto/krcrackers-go/src/errors"
 	"github.com/thaletto/krcrackers-go/src/eventbus"
 	"github.com/thaletto/krcrackers-go/src/eventbus/events"
 )
@@ -19,6 +19,8 @@ type ProductFields struct {
 	Category     string   `json:"category"`
 	Image        *string  `json:"image,omitempty"`
 	ComparePrice float64  `json:"comparePrice"`
+	Rating       *float64 `json:"rating,omitempty"`
+	Delivery     *string  `json:"delivery,omitempty"`
 }
 
 type Product struct {
@@ -58,13 +60,14 @@ func NewService(db database.DB, bus eventbus.Bus) *Service {
 }
 
 func (s *Service) Create(ctx context.Context, input ProductInput) (Product, error) {
+	input = normalizeProductInput(input)
 	if err := validateProductInput(input); err != nil {
 		return Product{}, err
 	}
 	res, err := s.db.Execute(ctx, `
-		INSERT INTO products (name, price, brand, description, category, image, compare_price)
-		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice)
+		INSERT INTO products (name, price, brand, description, category, image, compare_price, rating, delivery)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice, input.Rating, input.Delivery)
 	if err != nil {
 		return Product{}, fmt.Errorf("insert product: %w", err)
 	}
@@ -86,7 +89,7 @@ func (s *Service) List(ctx context.Context, limit, offset int) (ListProductsResp
 	}
 
 	query := `
-		SELECT id, name, price, brand, description, category, image, compare_price
+		SELECT id, name, price, brand, description, category, image, compare_price, rating, delivery
 		FROM products
 		ORDER BY id
 	`
@@ -182,7 +185,7 @@ func (s *Service) Search(ctx context.Context, filter Filter) (ListProductsRespon
 		orderBy = "p.price DESC"
 	}
 
-	query := "SELECT p.id, p.name, p.price, p.brand, p.description, p.category, p.image, p.compare_price FROM " + fromClause + whereClause + " ORDER BY " + orderBy
+	query := "SELECT p.id, p.name, p.price, p.brand, p.description, p.category, p.image, p.compare_price, p.rating, p.delivery FROM " + fromClause + whereClause + " ORDER BY " + orderBy
 
 	queryArgs := make([]any, len(args))
 	copy(queryArgs, args)
@@ -221,7 +224,7 @@ func (s *Service) Search(ctx context.Context, filter Filter) (ListProductsRespon
 
 func (s *Service) Get(ctx context.Context, id int) (Product, error) {
 	rows, err := s.db.Query(ctx, `
-		SELECT id, name, price, brand, description, category, image, compare_price
+		SELECT id, name, price, brand, description, category, image, compare_price, rating, delivery
 		FROM products WHERE id = ?
 	`, id)
 	if err != nil {
@@ -234,14 +237,15 @@ func (s *Service) Get(ctx context.Context, id int) (Product, error) {
 }
 
 func (s *Service) Update(ctx context.Context, id int, input ProductInput) (Product, error) {
+	input = normalizeProductInput(input)
 	if err := validateProductInput(input); err != nil {
 		return Product{}, err
 	}
 	res, err := s.db.Execute(ctx, `
 		UPDATE products
-		SET name = ?, price = ?, brand = ?, description = ?, category = ?, image = ?, compare_price = ?
+		SET name = ?, price = ?, brand = ?, description = ?, category = ?, image = ?, compare_price = ?, rating = ?, delivery = ?
 		WHERE id = ?
-	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice, id)
+	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice, input.Rating, input.Delivery, id)
 	if err != nil {
 		return Product{}, fmt.Errorf("update product %d: %w", id, err)
 	}
@@ -276,7 +280,7 @@ func (s *Service) GetByIDs(ctx context.Context, ids []int) ([]Product, error) {
 		args[i] = id
 	}
 	query := fmt.Sprintf(`
-		SELECT id, name, price, brand, description, category, image, compare_price
+		SELECT id, name, price, brand, description, category, image, compare_price, rating, delivery
 		FROM products WHERE id IN (%s)
 	`, strings.Join(placeholders, ","))
 
@@ -322,6 +326,8 @@ func (s *Service) publishProductEvent(ctx context.Context, eventName string, p P
 			Category:     p.Category,
 			Image:        img,
 			ComparePrice: p.ComparePrice,
+			Rating:       p.Rating,
+			Delivery:     p.Delivery,
 		},
 	})
 }
@@ -346,7 +352,22 @@ func validateProductInput(p ProductInput) error {
 	if p.Category == "" {
 		return fmt.Errorf("category is required")
 	}
+	if p.Rating != nil && (*p.Rating < 0 || *p.Rating > 5) {
+		return fmt.Errorf("rating must be between 0 and 5")
+	}
 	return nil
+}
+
+func normalizeProductInput(input ProductInput) ProductInput {
+	if input.Delivery != nil {
+		delivery := strings.TrimSpace(*input.Delivery)
+		if delivery == "" {
+			input.Delivery = nil
+		} else {
+			input.Delivery = &delivery
+		}
+	}
+	return input
 }
 
 func productFromInput(id int, b ProductInput) Product {
@@ -386,6 +407,14 @@ func rowToProduct(row database.Row) (Product, error) {
 	if err != nil {
 		return Product{}, err
 	}
+	rating, err := row.NullableFloat("rating")
+	if err != nil {
+		return Product{}, err
+	}
+	delivery, err := row.NullableString("delivery")
+	if err != nil {
+		return Product{}, err
+	}
 	return Product{
 		ID: int(id),
 		ProductFields: ProductFields{
@@ -396,6 +425,8 @@ func rowToProduct(row database.Row) (Product, error) {
 			Category:     category,
 			Image:        image,
 			ComparePrice: comparePrice,
+			Rating:       rating,
+			Delivery:     delivery,
 		},
 	}, nil
 }

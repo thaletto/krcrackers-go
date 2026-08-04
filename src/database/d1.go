@@ -253,6 +253,21 @@ func (r *d1Row) Float(name string) (float64, error) {
 	return 0, &TypeError{Column: name, Source: fmt.Sprintf("%T", v), Want: "float"}
 }
 
+func (r *d1Row) NullableFloat(name string) (*float64, error) {
+	v, err := r.lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	if v == nil {
+		return nil, nil
+	}
+	value, err := r.Float(name)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
 func (r *d1Row) String(name string) (string, error) {
 	v, err := r.lookup(name)
 	if err != nil {

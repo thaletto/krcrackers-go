@@ -2313,6 +2313,9 @@
 					"description": {
 						"type": "string"
 					},
+					"delivery": {
+						"type": "string"
+					},
 					"id": {
 						"type": "integer"
 					},
@@ -2323,6 +2326,9 @@
 						"type": "string"
 					},
 					"price": {
+						"type": "number"
+					},
+					"rating": {
 						"type": "number"
 					}
 				}
@@ -2342,6 +2348,9 @@
 					"description": {
 						"type": "string"
 					},
+					"delivery": {
+						"type": "string"
+					},
 					"image": {
 						"type": "string"
 					},
@@ -2349,6 +2358,9 @@
 						"type": "string"
 					},
 					"price": {
+						"type": "number"
+					},
+					"rating": {
 						"type": "number"
 					}
 				}

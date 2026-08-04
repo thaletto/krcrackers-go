@@ -168,3 +168,45 @@ func TestUpCreatesExpectedTables(t *testing.T) {
 		}
 	}
 }
+
+func TestProductMetadataMigrationUpAndDown(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+
+	assertProductColumns := func(wantRating, wantDelivery bool) {
+		t.Helper()
+		rows, err := db.Query(ctx, `PRAGMA table_info(products)`)
+		if err != nil {
+			t.Fatalf("PRAGMA table_info: %v", err)
+		}
+		columns := make(map[string]bool)
+		for _, row := range rows {
+			name, err := row.String("name")
+			if err != nil {
+				t.Fatalf("column name: %v", err)
+			}
+			columns[name] = true
+		}
+		if columns["rating"] != wantRating {
+			t.Errorf("rating column present=%v, want %v", columns["rating"], wantRating)
+		}
+		if columns["delivery"] != wantDelivery {
+			t.Errorf(
+				"delivery column present=%v, want %v",
+				columns["delivery"],
+				wantDelivery,
+			)
+		}
+	}
+
+	assertProductColumns(true, true)
+
+	if err := migrations.Down(ctx, db); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+	assertProductColumns(false, false)
+}

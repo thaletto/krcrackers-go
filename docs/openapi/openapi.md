@@ -192,7 +192,8 @@ Same as `orders.Order` except no `id`, `items` is `orders.OrderItemFields[]` (no
 ```json
 {
   "id": 0, "name": "", "description": "", "price": 0,
-  "comparePrice": 0, "category": "", "brand": "", "image": ""
+  "comparePrice": 0, "category": "", "brand": "", "image": "",
+  "rating": 4.8, "delivery": "Delivery in 2 days"
 }
 ```
 

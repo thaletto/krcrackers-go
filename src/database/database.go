@@ -17,6 +17,7 @@ type Result struct {
 type Row interface {
 	Int(name string) (int64, error)
 	Float(name string) (float64, error)
+	NullableFloat(name string) (*float64, error)
 	String(name string) (string, error)
 	NullableString(name string) (*string, error)
 }

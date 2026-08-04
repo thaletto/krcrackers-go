@@ -32,6 +32,20 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	mux.HandleFunc("DELETE /admin/products/{id}", adminAuth(h.delete))
 }
 
+// create godoc
+//
+// @Summary      Create a product
+// @Description  Create a product as an administrator
+// @Tags         products
+// @Accept       json
+// @Produce      json
+// @Param        input  body      products.ProductInput  true  "Product details"
+// @Success      201    {object}  products.Product
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      403    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /admin/products [post]
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var input products.ProductInput
 	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
@@ -48,6 +62,23 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusCreated, product)
 }
 
+// list godoc
+//
+// @Summary      List products
+// @Description  List products with optional search, filter, sort, and pagination
+// @Tags         products
+// @Produce      json
+// @Param        q          query     string  false  "Search query"
+// @Param        category   query     string  false  "Category"
+// @Param        brand      query     string  false  "Brand"
+// @Param        min_price  query     number  false  "Minimum price"
+// @Param        max_price  query     number  false  "Maximum price"
+// @Param        sort       query     string  false  "Sort order"
+// @Param        limit      query     int     false  "Page limit"
+// @Param        offset     query     int     false  "Page offset"
+// @Success      200        {object}  products.ListProductsResponse
+// @Failure      500        {object}  server.ErrorResponse
+// @Router       /products [get]
 func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	q := r.URL.Query()
 	query := q.Get("q")
@@ -81,6 +112,18 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, resp)
 }
 
+// get godoc
+//
+// @Summary      Get a product
+// @Description  Get a product by ID
+// @Tags         products
+// @Produce      json
+// @Param        id   path      int  true  "Product ID"
+// @Success      200  {object}  products.Product
+// @Failure      400  {object}  server.ErrorResponse
+// @Failure      404  {object}  server.ErrorResponse
+// @Failure      500  {object}  server.ErrorResponse
+// @Router       /products/{id} [get]
 func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -101,6 +144,22 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, product)
 }
 
+// update godoc
+//
+// @Summary      Update a product
+// @Description  Replace a product as an administrator
+// @Tags         products
+// @Accept       json
+// @Produce      json
+// @Param        id     path      int                    true  "Product ID"
+// @Param        input  body      products.ProductInput  true  "Product details"
+// @Success      200    {object}  products.Product
+// @Failure      400    {object}  server.ErrorResponse
+// @Failure      401    {object}  server.ErrorResponse
+// @Failure      403    {object}  server.ErrorResponse
+// @Failure      404    {object}  server.ErrorResponse
+// @Failure      422    {object}  server.ErrorResponse
+// @Router       /admin/products/{id} [put]
 func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {
@@ -127,6 +186,19 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	server.WriteJSON(w, http.StatusOK, product)
 }
 
+// delete godoc
+//
+// @Summary      Delete a product
+// @Description  Delete a product as an administrator
+// @Tags         products
+// @Param        id   path  int  true  "Product ID"
+// @Success      204
+// @Failure      400  {object}  server.ErrorResponse
+// @Failure      401  {object}  server.ErrorResponse
+// @Failure      403  {object}  server.ErrorResponse
+// @Failure      404  {object}  server.ErrorResponse
+// @Failure      500  {object}  server.ErrorResponse
+// @Router       /admin/products/{id} [delete]
 func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	id, err := strconv.Atoi(r.PathValue("id"))
 	if err != nil {

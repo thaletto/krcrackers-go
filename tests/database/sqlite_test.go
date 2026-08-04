@@ -159,6 +159,42 @@ func TestFloatAccessorReadsFloatColumn(t *testing.T) {
 	}
 }
 
+func TestNullableFloatHandlesNullAndValue(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if _, err := db.Execute(ctx, `CREATE TABLE t (rating REAL)`); err != nil {
+		t.Fatalf("create: %v", err)
+	}
+	if _, err := db.Execute(ctx, `INSERT INTO t (rating) VALUES (NULL), (?)`, 4.8); err != nil {
+		t.Fatalf("insert: %v", err)
+	}
+
+	rows, err := db.Query(ctx, `SELECT rating FROM t ORDER BY rowid`)
+	if err != nil {
+		t.Fatalf("query: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("rows: got %d, want 2", len(rows))
+	}
+
+	gotNull, err := rows[0].NullableFloat("rating")
+	if err != nil {
+		t.Fatalf("NullableFloat on null: %v", err)
+	}
+	if gotNull != nil {
+		t.Errorf("null row: got %v, want nil", *gotNull)
+	}
+
+	gotValue, err := rows[1].NullableFloat("rating")
+	if err != nil {
+		t.Fatalf("NullableFloat on value: %v", err)
+	}
+	if gotValue == nil || *gotValue != 4.8 {
+		t.Errorf("value row: got %v, want 4.8", gotValue)
+	}
+}
+
 func TestBeginCommitPersists(t *testing.T) {
 	ctx := context.Background()
 	db := newTestDB(t)

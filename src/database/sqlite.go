@@ -211,6 +211,24 @@ func (r *sqliteRow) Float(name string) (float64, error) {
 	return toFloat64(v)
 }
 
+func (r *sqliteRow) NullableFloat(name string) (*float64, error) {
+	v, t, err := r.lookup(name)
+	if err != nil {
+		return nil, err
+	}
+	if !isFloatType(t) {
+		return nil, &TypeError{Column: name, Source: t, Want: "float"}
+	}
+	if v == nil {
+		return nil, nil
+	}
+	value, err := toFloat64(v)
+	if err != nil {
+		return nil, err
+	}
+	return &value, nil
+}
+
 func (r *sqliteRow) String(name string) (string, error) {
 	v, t, err := r.lookup(name)
 	if err != nil {

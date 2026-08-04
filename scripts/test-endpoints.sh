@@ -123,9 +123,19 @@ rm -rf .data/
 mkdir -p .data
 JWT_SECRET="test-secret-key-for-testing-only" nohup go run ./src > /tmp/test-server.log 2>&1 &
 SERVER_PID=$!
-sleep 3
 
-# Check server is running
+# Wait for the server to compile and become ready.
+for _ in {1..20}; do
+    if curl -s "$BASE_URL/health" > /dev/null 2>&1; then
+        break
+    fi
+    if ! kill -0 "$SERVER_PID" 2>/dev/null; then
+        break
+    fi
+    sleep 1
+done
+
+# Check server is running.
 if ! curl -s "$BASE_URL/health" > /dev/null 2>&1; then
     echo -e "${RED}Failed to start server${NC}"
     cat /tmp/test-server.log
@@ -296,12 +306,17 @@ test_endpoint "POST" "/admin/products" 401 "Create product without auth" \
 
 # Create product as admin
 test_endpoint "POST" "/admin/products" 201 "Create product as admin" \
-    '{"name":"Test Product","price":99.99,"category":"Test","description":"A test product","brand":"TestBrand"}' \
+    '{"name":"Test Product","price":99.99,"category":"Test","description":"A test product","brand":"TestBrand","rating":4.8,"delivery":"Delivery in 2 days"}' \
     "$ADMIN_COOKIE_JAR"
 
 # Create another product
 test_endpoint "POST" "/admin/products" 201 "Create second product" \
     '{"name":"Another Product","price":149.99,"category":"Test","description":"Another test product"}' \
+    "$ADMIN_COOKIE_JAR"
+
+# Reject an invalid rating
+test_endpoint "POST" "/admin/products" 422 "Reject invalid product rating" \
+    '{"name":"Invalid Rating","price":99.99,"category":"Test","rating":5.1}' \
     "$ADMIN_COOKIE_JAR"
 
 # List products

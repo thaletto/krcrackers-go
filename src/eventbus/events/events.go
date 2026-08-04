@@ -25,6 +25,8 @@ type ProductEvent struct {
 	Category     string
 	Image        string
 	ComparePrice float64
+	Rating       *float64
+	Delivery     *string
 }
 
 // OrderEvent carries order data for order lifecycle events.
