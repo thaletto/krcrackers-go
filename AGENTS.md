@@ -147,3 +147,17 @@ go doc src/services/auth.WithAuth # auth middleware
 ```
 
 HTML docs: open `docs/index.html` in a browser.
+
+## Agent skills
+
+### Issue tracker
+
+Issues are tracked in the Linear project `KR Crackers`. See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+Use the five canonical triage labels without overrides. See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+This repository uses a single-context domain documentation layout. See `docs/agents/domain.md`.
