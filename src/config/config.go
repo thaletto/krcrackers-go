@@ -18,6 +18,7 @@ type Config struct {
 	Port         string
 	R2           R2Config
 	JWT          JWTConfig
+	Google       GoogleConfig
 	WhatsApp     WhatsAppConfig
 	IsProduction bool
 }
@@ -34,10 +35,14 @@ type JWTConfig struct {
 	Secret string
 }
 
+type GoogleConfig struct {
+	ClientID string
+}
+
 type WhatsAppConfig struct {
-	APIToken     string
+	APIToken      string
 	PhoneNumberID string
-	FromNumber   string
+	FromNumber    string
 }
 
 // Load reads configuration from .env and .env.local files, then selects
@@ -71,6 +76,9 @@ func Load() (*Config, error) {
 		},
 		JWT: JWTConfig{
 			Secret: os.Getenv("JWT_SECRET"),
+		},
+		Google: GoogleConfig{
+			ClientID: os.Getenv("GOOGLE_OAUTH_CLIENT_ID"),
 		},
 		WhatsApp: WhatsAppConfig{
 			APIToken:      os.Getenv("WHATSAPP_API_TOKEN"),

@@ -13,13 +13,15 @@ import (
 // Domain sentinels returned by the auth Service. The HTTP layer maps these
 // to status codes via errors.Is.
 var (
-	ErrEmailExists         = errors.New("email already registered")
-	ErrInvalidCredentials  = errors.New("invalid credentials")
-	ErrInvalidGoogleToken  = errors.New("invalid google id token")
-	ErrNoRefreshToken      = errors.New("no refresh token")
-	ErrInvalidRefreshToken = errors.New("invalid refresh token")
-	ErrRefreshExpired      = errors.New("refresh token expired")
-	ErrUserNotFound        = errors.New("user not found")
+	ErrEmailExists               = errors.New("email already registered")
+	ErrInvalidCredentials        = errors.New("invalid credentials")
+	ErrInvalidGoogleToken        = errors.New("invalid google id token")
+	ErrGoogleLoginUnavailable    = errors.New("google login is temporarily unavailable")
+	ErrGoogleAccountLinkRequired = errors.New("this email already has a password account; sign in with your password")
+	ErrNoRefreshToken            = errors.New("no refresh token")
+	ErrInvalidRefreshToken       = errors.New("invalid refresh token")
+	ErrRefreshExpired            = errors.New("refresh token expired")
+	ErrUserNotFound              = errors.New("user not found")
 )
 
 // AuthResult bundles a user with the access and refresh tokens issued for
@@ -34,18 +36,30 @@ type AuthResult struct {
 // refresh token rotation, logout, and current-user lookup. It depends on a
 // Repository for persistence and is otherwise free of HTTP concerns.
 type Service struct {
-	repo Repository
+	repo           Repository
+	googleVerifier GoogleTokenVerifier
 }
+
+// GoogleTokenVerifier verifies a Google ID token and returns its trusted identity.
+type GoogleTokenVerifier func(idToken string) (GoogleIdentity, error)
 
 // NewService creates a new auth service. Panics if jwtSecret is empty; the
 // secret is registered with the package's JWT helpers so the HTTP middleware
 // in apis/auth can validate tokens.
-func NewService(repo Repository, jwtSecret string) *Service {
+func NewService(repo Repository, jwtSecret, googleClientID string) *Service {
+	return NewServiceWithGoogleVerifier(repo, jwtSecret, func(idToken string) (GoogleIdentity, error) {
+		return VerifyGoogleIDToken(idToken, googleClientID)
+	})
+}
+
+// NewServiceWithGoogleVerifier creates an auth service with an injectable Google
+// verifier for external tests.
+func NewServiceWithGoogleVerifier(repo Repository, jwtSecret string, verifier GoogleTokenVerifier) *Service {
 	if jwtSecret == "" {
 		panic("auth: JWT_SECRET is required")
 	}
 	SetJWTSecret(jwtSecret)
-	return &Service{repo: repo}
+	return &Service{repo: repo, googleVerifier: verifier}
 }
 
 // Register creates a new user with email and password, then issues tokens.
@@ -91,20 +105,36 @@ func (s *Service) Login(ctx context.Context, email, password string) (AuthResult
 // LoginWithGoogle authenticates with a Google ID token, auto-creating the
 // user if the email is new.
 func (s *Service) LoginWithGoogle(ctx context.Context, idToken string) (AuthResult, error) {
-	claims, err := VerifyGoogleIDToken(idToken)
+	if s.googleVerifier == nil {
+		return AuthResult{}, ErrGoogleLoginUnavailable
+	}
+	identity, err := s.googleVerifier(idToken)
 	if err != nil {
+		if errors.Is(err, ErrGoogleLoginUnavailable) {
+			return AuthResult{}, err
+		}
 		return AuthResult{}, fmt.Errorf("%w: %s", ErrInvalidGoogleToken, err.Error())
 	}
 
-	user, err := s.repo.GetByEmail(ctx, claims.Email)
+	user, err := s.repo.GetByProviderID(ctx, "google", identity.Subject)
+	if err != nil {
+		return AuthResult{}, fmt.Errorf("get user by Google subject: %w", err)
+	}
+	if user.ID != 0 {
+		return s.issueTokens(ctx, user)
+	}
+
+	user, err = s.repo.GetByEmail(ctx, identity.Email)
 	if err != nil {
 		return AuthResult{}, fmt.Errorf("get user: %w", err)
 	}
-	if user.ID == 0 {
-		user, err = s.repo.Create(ctx, claims.Email, claims.Name, "", "google", claims.Sub, "", "customer")
-		if err != nil {
-			return AuthResult{}, fmt.Errorf("create user: %w", err)
-		}
+	if user.ID != 0 {
+		return AuthResult{}, ErrGoogleAccountLinkRequired
+	}
+
+	user, err = s.repo.Create(ctx, identity.Email, identity.Name, "", "google", identity.Subject, "", "customer")
+	if err != nil {
+		return AuthResult{}, fmt.Errorf("create user: %w", err)
 	}
 
 	return s.issueTokens(ctx, user)

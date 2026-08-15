@@ -121,7 +121,7 @@ sleep 1
 echo -e "${YELLOW}Starting server...${NC}"
 rm -rf .data/
 mkdir -p .data
-JWT_SECRET="test-secret-key-for-testing-only" nohup go run ./src > /tmp/test-server.log 2>&1 &
+JWT_SECRET="test-secret-key-for-testing-only" GOOGLE_OAUTH_CLIENT_ID="test-client.apps.googleusercontent.com" nohup go run ./src > /tmp/test-server.log 2>&1 &
 SERVER_PID=$!
 
 # Wait for the server to compile and become ready.
@@ -146,7 +146,7 @@ echo ""
 
 # Run migrations
 echo -e "${YELLOW}Running migrations...${NC}"
-JWT_SECRET="test-secret-key-for-testing-only" go run ./src migrate up 2>&1 | grep -v "^$" || true
+JWT_SECRET="test-secret-key-for-testing-only" GOOGLE_OAUTH_CLIENT_ID="test-client.apps.googleusercontent.com" go run ./src migrate up 2>&1 | grep -v "^$" || true
 echo -e "${GREEN}Migrations complete${NC}"
 echo ""
 

@@ -148,7 +148,7 @@ func newHandler(db database.DB, cfg *config.Config) http.Handler {
 	}
 
 	authRepo := auth.NewRepository(db)
-	authSvc := auth.NewService(authRepo, cfg.JWT.Secret)
+	authSvc := auth.NewService(authRepo, cfg.JWT.Secret, cfg.Google.ClientID)
 	authHandler := authapi.NewHandler(authSvc, cfg.IsProduction)
 
 	customersRepo := customers.NewRepository(db)

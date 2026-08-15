@@ -206,7 +206,12 @@ func TestProductMetadataMigrationUpAndDown(t *testing.T) {
 	assertProductColumns(true, true)
 
 	if err := migrations.Down(ctx, db); err != nil {
-		t.Fatalf("Down: %v", err)
+		t.Fatalf("rollback Google provider migration: %v", err)
+	}
+	assertProductColumns(true, true)
+
+	if err := migrations.Down(ctx, db); err != nil {
+		t.Fatalf("rollback product metadata migration: %v", err)
 	}
 	assertProductColumns(false, false)
 }

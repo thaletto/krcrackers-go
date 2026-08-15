@@ -34,11 +34,17 @@ type jwksResponse struct {
 }
 
 type googleClaims struct {
-	Sub     string `json:"sub"`
-	Email   string `json:"email"`
-	Name    string `json:"name"`
-	Picture string `json:"picture"`
+	Email         string `json:"email"`
+	Name          string `json:"name"`
+	EmailVerified bool   `json:"email_verified"`
 	jwt.RegisteredClaims
+}
+
+// GoogleIdentity is the verified subset of a Google ID token used for login.
+type GoogleIdentity struct {
+	Subject string
+	Email   string
+	Name    string
 }
 
 type keyCache struct {
@@ -70,6 +76,9 @@ func fetchJWKS() (map[string]*rsa.PublicKey, error) {
 		return nil, fmt.Errorf("fetch jwks: %w", err)
 	}
 	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("fetch jwks: unexpected status %d", resp.StatusCode)
+	}
 
 	var jwks jwksResponse
 	if err := json.NewDecoder(resp.Body).Decode(&jwks); err != nil {
@@ -78,7 +87,7 @@ func fetchJWKS() (map[string]*rsa.PublicKey, error) {
 
 	keys := make(map[string]*rsa.PublicKey)
 	for _, k := range jwks.Keys {
-		if k.Kty != "RSA" {
+		if k.Kty != "RSA" || k.Alg != "RS256" || k.Use != "sig" {
 			continue
 		}
 		nBytes, err := base64.RawURLEncoding.DecodeString(k.N)
@@ -101,10 +110,13 @@ func fetchJWKS() (map[string]*rsa.PublicKey, error) {
 
 // VerifyGoogleIDToken validates a Google ID token using Google's JWKS endpoint.
 // Keys are cached for 6 hours to reduce latency and avoid rate limits.
-func VerifyGoogleIDToken(idToken string) (*googleClaims, error) {
+func VerifyGoogleIDToken(idToken, clientID string) (GoogleIdentity, error) {
+	if clientID == "" {
+		return GoogleIdentity{}, ErrGoogleLoginUnavailable
+	}
 	keys, err := fetchJWKS()
 	if err != nil {
-		return nil, err
+		return GoogleIdentity{}, err
 	}
 
 	token, err := jwt.ParseWithClaims(idToken, &googleClaims{}, func(t *jwt.Token) (interface{}, error) {
@@ -127,19 +139,25 @@ func VerifyGoogleIDToken(idToken string) (*googleClaims, error) {
 			}
 		}
 		return key, nil
-	})
+	}, jwt.WithValidMethods([]string{jwt.SigningMethodRS256.Alg()}), jwt.WithAudience(clientID))
 	if err != nil {
-		return nil, fmt.Errorf("invalid token: %w", err)
+		return GoogleIdentity{}, fmt.Errorf("invalid token: %w", err)
 	}
 
 	claims, ok := token.Claims.(*googleClaims)
 	if !ok || !token.Valid {
-		return nil, fmt.Errorf("invalid token claims")
+		return GoogleIdentity{}, fmt.Errorf("invalid token claims")
 	}
-
 	if claims.Issuer != googleIssuer && claims.Issuer != "accounts.google.com" {
-		return nil, fmt.Errorf("invalid issuer: %s", claims.Issuer)
+		return GoogleIdentity{}, fmt.Errorf("invalid issuer: %s", claims.Issuer)
+	}
+	if claims.Subject == "" || claims.Email == "" || !claims.EmailVerified {
+		return GoogleIdentity{}, fmt.Errorf("missing verified Google identity")
 	}
 
-	return claims, nil
+	return GoogleIdentity{
+		Subject: claims.Subject,
+		Email:   claims.Email,
+		Name:    claims.Name,
+	}, nil
 }

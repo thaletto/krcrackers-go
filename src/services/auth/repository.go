@@ -26,6 +26,7 @@ type User struct {
 type Repository interface {
 	Create(ctx context.Context, email, name, phone, authProvider, authProviderID, passwordHash, role string) (User, error)
 	GetByEmail(ctx context.Context, email string) (User, error)
+	GetByProviderID(ctx context.Context, provider, providerID string) (User, error)
 	GetByID(ctx context.Context, id int) (User, error)
 	Update(ctx context.Context, id int, name, phone string) (User, error)
 	CreateRefreshToken(ctx context.Context, userID int, token string, expiresAt time.Time) error
@@ -59,6 +60,20 @@ func (r *repo) GetByEmail(ctx context.Context, email string) (User, error) {
 		SELECT id, email, name, phone, avatar_url, auth_provider, auth_provider_id, password_hash, role, created_at, updated_at
 		FROM users WHERE email = ?
 	`, email)
+	if err != nil {
+		return User{}, err
+	}
+	if len(rows) == 0 {
+		return User{}, nil
+	}
+	return rowToUser(rows[0])
+}
+
+func (r *repo) GetByProviderID(ctx context.Context, provider, providerID string) (User, error) {
+	rows, err := r.db.Query(ctx, `
+		SELECT id, email, name, phone, avatar_url, auth_provider, auth_provider_id, password_hash, role, created_at, updated_at
+		FROM users WHERE auth_provider = ? AND auth_provider_id = ?
+	`, provider, providerID)
 	if err != nil {
 		return User{}, err
 	}

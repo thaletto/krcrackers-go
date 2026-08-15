@@ -129,7 +129,9 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 // @Success      200    {object}  authResponse
 // @Failure      400    {object}  server.ErrorResponse
 // @Failure      401    {object}  server.ErrorResponse
+// @Failure      409    {object}  server.ErrorResponse
 // @Failure      422    {object}  server.ErrorResponse
+// @Failure      503    {object}  server.ErrorResponse
 // @Router       /auth/google [post]
 func (h *Handler) googleLogin(w http.ResponseWriter, r *http.Request) {
 	var input struct {
@@ -146,6 +148,14 @@ func (h *Handler) googleLogin(w http.ResponseWriter, r *http.Request) {
 
 	res, err := h.svc.LoginWithGoogle(r.Context(), input.IDToken)
 	if err != nil {
+		if errors.Is(err, svc.ErrGoogleLoginUnavailable) {
+			server.WriteError(w, http.StatusServiceUnavailable, err.Error())
+			return
+		}
+		if errors.Is(err, svc.ErrGoogleAccountLinkRequired) {
+			server.WriteError(w, http.StatusConflict, err.Error())
+			return
+		}
 		if errors.Is(err, svc.ErrInvalidGoogleToken) {
 			server.WriteError(w, http.StatusUnauthorized, err.Error())
 			return
