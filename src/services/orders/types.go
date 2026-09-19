@@ -25,11 +25,11 @@ const (
 
 // OrderItemFields contains the data fields for an order line item.
 type OrderItemFields struct {
-	ProductID   int     `json:"productId"`
-	ProductName string  `json:"productName"`
 	Price       float64 `json:"price"`
-	Quantity    int     `json:"quantity"`
 	Total       float64 `json:"total"`
+	ProductID   int     `json:"productId"`
+	Quantity    int     `json:"quantity"`
+	ProductName string  `json:"productName"`
 }
 
 // OrderItem is an order line item as it comes back from the repository.
@@ -40,8 +40,8 @@ type OrderItem struct {
 
 // OrderFields contains the data fields for an order header.
 type OrderFields struct {
+	Total                float64     `json:"total"`
 	Status               OrderStatus `json:"status"`
-	UserID               *int        `json:"userId,omitempty"`
 	UserName             string      `json:"userName"`
 	Email                string      `json:"email"`
 	Phone                string      `json:"phone"`
@@ -49,12 +49,12 @@ type OrderFields struct {
 	TownOrCity           string      `json:"townOrCity"`
 	State                string      `json:"state"`
 	Pincode              string      `json:"pincode"`
-	Notes                *string     `json:"notes,omitempty"`
 	DeliveryRegion       string      `json:"deliveryRegion"`
 	DeliveryLocation     string      `json:"deliveryLocation"`
-	Total                float64     `json:"total"`
 	PaymentScreenshotURL string      `json:"paymentScreenshotUrl,omitempty"`
 	PaymentReference     string      `json:"paymentReference,omitempty"`
+	UserID               *int        `json:"userId,omitempty"`
+	Notes                *string     `json:"notes,omitempty"`
 }
 
 // Order represents a complete order with its line items.
@@ -90,10 +90,10 @@ type DashboardStats struct {
 // CheckoutItem is a single line item in a checkout request, as submitted
 // by the client.
 type CheckoutItem struct {
-	ProductID   int     `json:"productId"`
-	ProductName string  `json:"productName"`
 	Price       float64 `json:"price"`
+	ProductID   int     `json:"productId"`
 	Quantity    int     `json:"quantity"`
+	ProductName string  `json:"productName"`
 }
 
 // UserProvider is an interface for fetching user data, used during checkout.

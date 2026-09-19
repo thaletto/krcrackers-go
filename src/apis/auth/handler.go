@@ -6,7 +6,6 @@
 package auth
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 
@@ -56,7 +55,7 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		Name     string `json:"name"`
 		Phone    string `json:"phone"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -96,7 +95,7 @@ func (h *Handler) login(w http.ResponseWriter, r *http.Request) {
 		Email    string `json:"email"`
 		Password string `json:"password"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -137,7 +136,7 @@ func (h *Handler) googleLogin(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		IDToken string `json:"idToken"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

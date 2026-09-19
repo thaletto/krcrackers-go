@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	_ "net/http/pprof"
 	"os"
 	"os/signal"
 	"syscall"
@@ -111,6 +112,10 @@ func runServer() {
 		Addr:              ":" + cfg.Port,
 		Handler:           handler,
 		ReadHeaderTimeout: 10 * time.Second,
+		ReadTimeout:       15 * time.Second,
+		WriteTimeout:      20 * time.Second,
+		IdleTimeout:       60 * time.Second,
+		MaxHeaderBytes:    1 << 20,
 	}
 
 	log.Printf("starting server in %s mode on :%s", cfg.Database.Mode, cfg.Port)
@@ -177,6 +182,11 @@ func newHandler(db database.DB, cfg *config.Config) http.Handler {
 	productsHandler.RegisterRoutes(mux)
 	ordersHandler.RegisterRoutes(mux)
 	invoicesHandler.RegisterRoutes(mux)
+
+	if !cfg.IsProduction {
+		mux.Handle("GET /debug/pprof/", http.DefaultServeMux)
+		mux.Handle("GET /debug/pprof/{action}", http.DefaultServeMux)
+	}
 
 	mux.HandleFunc("GET /health", func(w http.ResponseWriter, r *http.Request) {
 		server.WriteJSON(w, http.StatusOK, map[string]any{

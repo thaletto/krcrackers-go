@@ -40,35 +40,7 @@ func (s *sqliteDB) Query(ctx context.Context, sql string, params ...any) ([]Row,
 		return nil, err
 	}
 	defer rows.Close()
-
-	colTypes, err := rows.ColumnTypes()
-	if err != nil {
-		return nil, err
-	}
-	types := make(map[string]string, len(colTypes))
-	cols := make([]string, len(colTypes))
-	for i, ct := range colTypes {
-		cols[i] = ct.Name()
-		types[ct.Name()] = strings.ToUpper(ct.DatabaseTypeName())
-	}
-
-	out := make([]Row, 0)
-	for rows.Next() {
-		vals := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
-		for i := range vals {
-			ptrs[i] = &vals[i]
-		}
-		if err := rows.Scan(ptrs...); err != nil {
-			return nil, err
-		}
-		row := &sqliteRow{values: make(map[string]any, len(cols)), types: types}
-		for i, c := range cols {
-			row.values[c] = vals[i]
-		}
-		out = append(out, row)
-	}
-	return out, rows.Err()
+	return scanSQLiteRows(rows)
 }
 
 func (s *sqliteDB) Execute(ctx context.Context, sql string, params ...any) (Result, error) {
@@ -103,33 +75,32 @@ func (t *sqliteTx) Query(ctx context.Context, sql string, params ...any) ([]Row,
 		return nil, err
 	}
 	defer rows.Close()
+	return scanSQLiteRows(rows)
+}
 
+func scanSQLiteRows(rows *sql.Rows) ([]Row, error) {
 	colTypes, err := rows.ColumnTypes()
 	if err != nil {
 		return nil, err
 	}
+	index := make(map[string]int, len(colTypes))
 	types := make(map[string]string, len(colTypes))
-	cols := make([]string, len(colTypes))
 	for i, ct := range colTypes {
-		cols[i] = ct.Name()
+		index[ct.Name()] = i
 		types[ct.Name()] = strings.ToUpper(ct.DatabaseTypeName())
 	}
 
-	out := make([]Row, 0)
+	out := make([]Row, 0, 16)
 	for rows.Next() {
-		vals := make([]any, len(cols))
-		ptrs := make([]any, len(cols))
+		vals := make([]any, len(index))
+		ptrs := make([]any, len(index))
 		for i := range vals {
 			ptrs[i] = &vals[i]
 		}
 		if err := rows.Scan(ptrs...); err != nil {
 			return nil, err
 		}
-		row := &sqliteRow{values: make(map[string]any, len(cols)), types: types}
-		for i, c := range cols {
-			row.values[c] = vals[i]
-		}
-		out = append(out, row)
+		out = append(out, &sqliteRow{values: vals, index: index, types: types})
 	}
 	return out, rows.Err()
 }
@@ -153,15 +124,17 @@ func (t *sqliteTx) Rollback() error {
 }
 
 type sqliteRow struct {
-	values map[string]any
+	values []any
+	index  map[string]int
 	types  map[string]string
 }
 
 func (r *sqliteRow) lookup(name string) (any, string, error) {
-	v, ok := r.values[name]
-	if !ok {
+	i, ok := r.index[name]
+	if !ok || i < 0 || i >= len(r.values) {
 		return nil, "", fmt.Errorf("database: no column %q", name)
 	}
+	v := r.values[i]
 	t := r.types[name]
 	if t == "" {
 		t = runtimeType(v)

@@ -7,7 +7,7 @@ ENV_FILE   := .env.production
 
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda deploy-env test test-endpoints clean wrangler-login docs docs-update
+.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda deploy-env test test-endpoints bench load clean wrangler-login docs docs-update
 
 help:                ## Show this help message
 	@echo "Targets:"
@@ -72,6 +72,12 @@ test:                ## Run tests
 
 test-endpoints:      ## Run endpoint integration tests (starts server, tests all APIs, cleans up)
 	./scripts/test-endpoints.sh
+
+bench:               ## Run benchmarks (database, eventbus, products)
+	go test ./tests/database/ ./tests/eventbus/ ./tests/services/products/ -run=NONE -bench=. -benchmem
+
+load:                ## Load test read paths with k6 (requires k6; server must be running)
+	k6 run -e BASE_URL=$${BASE_URL:-http://localhost:8080} scripts/load.js
 
 clean:               ## Remove .data/ and .wrangler/
 	rm -rf .data .wrangler

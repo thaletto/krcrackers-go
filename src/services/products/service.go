@@ -12,13 +12,13 @@ import (
 )
 
 type ProductFields struct {
-	Name         string   `json:"name"`
 	Price        float64  `json:"price"`
+	ComparePrice float64  `json:"comparePrice"`
+	Name         string   `json:"name"`
+	Category     string   `json:"category"`
 	Brand        *string  `json:"brand,omitempty"`
 	Description  *string  `json:"description,omitempty"`
-	Category     string   `json:"category"`
 	Image        *string  `json:"image,omitempty"`
-	ComparePrice float64  `json:"comparePrice"`
 	Rating       *float64 `json:"rating,omitempty"`
 	Delivery     *string  `json:"delivery,omitempty"`
 }
@@ -77,19 +77,9 @@ func (s *Service) Create(ctx context.Context, input ProductInput) (Product, erro
 }
 
 func (s *Service) List(ctx context.Context, limit, offset int) (ListProductsResponse, error) {
-	countRows, err := s.db.Query(ctx, `SELECT COUNT(*) AS total FROM products`)
-	if err != nil {
-		return ListProductsResponse{}, fmt.Errorf("count products: %w", err)
-	}
-	total := 0
-	if len(countRows) > 0 {
-		if v, err := countRows[0].Int("total"); err == nil {
-			total = int(v)
-		}
-	}
-
 	query := `
-		SELECT id, name, price, brand, description, category, image, compare_price, rating, delivery
+		SELECT id, name, price, brand, description, category, image, compare_price, rating, delivery,
+			COUNT(*) OVER() AS total
 		FROM products
 		ORDER BY id
 	`
@@ -108,6 +98,13 @@ func (s *Service) List(ctx context.Context, limit, offset int) (ListProductsResp
 	if limit > 0 {
 		limitPtr = &limit
 		offsetPtr = &offset
+	}
+
+	total := 0
+	if len(rows) > 0 {
+		if v, err := rows[0].Int("total"); err == nil {
+			total = int(v)
+		}
 	}
 
 	items := make([]Product, 0, len(rows))
@@ -165,18 +162,6 @@ func (s *Service) Search(ctx context.Context, filter Filter) (ListProductsRespon
 		whereClause = " WHERE " + strings.Join(whereClauses, " AND ")
 	}
 
-	countQuery := "SELECT COUNT(*) AS total FROM " + fromClause + whereClause
-	countRows, err := s.db.Query(ctx, countQuery, args...)
-	if err != nil {
-		return ListProductsResponse{}, fmt.Errorf("count products: %w", err)
-	}
-	total := 0
-	if len(countRows) > 0 {
-		if v, err := countRows[0].Int("total"); err == nil {
-			total = int(v)
-		}
-	}
-
 	orderBy := "p.id DESC"
 	switch filter.Sort {
 	case "price_asc":
@@ -185,7 +170,7 @@ func (s *Service) Search(ctx context.Context, filter Filter) (ListProductsRespon
 		orderBy = "p.price DESC"
 	}
 
-	query := "SELECT p.id, p.name, p.price, p.brand, p.description, p.category, p.image, p.compare_price, p.rating, p.delivery FROM " + fromClause + whereClause + " ORDER BY " + orderBy
+	query := "SELECT p.id, p.name, p.price, p.brand, p.description, p.category, p.image, p.compare_price, p.rating, p.delivery, COUNT(*) OVER() AS total FROM " + fromClause + whereClause + " ORDER BY " + orderBy
 
 	queryArgs := make([]any, len(args))
 	copy(queryArgs, args)
@@ -204,6 +189,13 @@ func (s *Service) Search(ctx context.Context, filter Filter) (ListProductsRespon
 	if filter.Limit > 0 {
 		limitPtr = &filter.Limit
 		offsetPtr = &filter.Offset
+	}
+
+	total := 0
+	if len(rows) > 0 {
+		if v, err := rows[0].Int("total"); err == nil {
+			total = int(v)
+		}
 	}
 
 	items := make([]Product, 0, len(rows))

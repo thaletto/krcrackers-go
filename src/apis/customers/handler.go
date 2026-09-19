@@ -4,7 +4,6 @@
 package customers
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -78,7 +77,7 @@ func (h *Handler) updateProfile(w http.ResponseWriter, r *http.Request) {
 		Name  string `json:"name"`
 		Phone string `json:"phone"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -126,7 +125,7 @@ func (h *Handler) listAddresses(w http.ResponseWriter, r *http.Request) {
 func (h *Handler) createAddress(w http.ResponseWriter, r *http.Request) {
 	user := auth.GetUser(r)
 	var input svc.AddressInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -165,7 +164,7 @@ func (h *Handler) updateAddress(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input svc.AddressInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

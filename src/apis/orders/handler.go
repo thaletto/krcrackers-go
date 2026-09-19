@@ -66,7 +66,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // @Router       /orders [post]
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var input svc.OrderInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -152,7 +152,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input svc.OrderInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -213,7 +213,8 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 // @Failure      422    {object}  server.ErrorResponse
 // @Router       /orders/checkout [post]
 func (h *Handler) checkout(w http.ResponseWriter, r *http.Request) {
-	if err := r.ParseMultipartForm(32 << 20); err != nil {
+	r.Body = http.MaxBytesReader(w, r.Body, server.MaxUploadBytes)
+	if err := r.ParseMultipartForm(8 << 20); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid multipart form")
 		return
 	}
@@ -453,7 +454,7 @@ func (h *Handler) adminUpdateStatus(w http.ResponseWriter, r *http.Request) {
 	var input struct {
 		Status string `json:"status"`
 	}
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

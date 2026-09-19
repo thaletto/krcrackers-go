@@ -77,19 +77,9 @@ func (r *repo) Create(ctx context.Context, input OrderInput) (Order, error) {
 }
 
 func (r *repo) List(ctx context.Context, limit, offset int) (ListOrdersResponse, error) {
-	countRows, err := r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders`)
-	if err != nil {
-		return ListOrdersResponse{}, fmt.Errorf("count orders: %w", err)
-	}
-	total := 0
-	if len(countRows) > 0 {
-		if v, err := countRows[0].Int("total"); err == nil {
-			total = int(v)
-		}
-	}
-
 	query := `
-		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
+		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at,
+			COUNT(*) OVER() AS total_count
 		FROM orders ORDER BY id DESC
 	`
 	var queryArgs []any
@@ -107,6 +97,13 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListOrdersResponse,
 	if limit > 0 {
 		limitPtr = &limit
 		offsetPtr = &offset
+	}
+
+	total := 0
+	if len(rows) > 0 {
+		if v, err := rows[0].Int("total_count"); err == nil {
+			total = int(v)
+		}
 	}
 
 	items := make([]Order, 0, len(rows))
@@ -276,19 +273,9 @@ func (r *repo) Checkout(ctx context.Context, input OrderInput) (Order, error) {
 }
 
 func (r *repo) ListForUser(ctx context.Context, userID int, limit, offset int) (ListOrdersResponse, error) {
-	countRows, err := r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders WHERE user_id = ?`, userID)
-	if err != nil {
-		return ListOrdersResponse{}, err
-	}
-	total := 0
-	if len(countRows) > 0 {
-		if v, err := countRows[0].Int("total"); err == nil {
-			total = int(v)
-		}
-	}
-
 	query := `
-		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
+		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at,
+			COUNT(*) OVER() AS total_count
 		FROM orders WHERE user_id = ? ORDER BY id DESC
 	`
 	var args []any
@@ -307,6 +294,13 @@ func (r *repo) ListForUser(ctx context.Context, userID int, limit, offset int) (
 	if limit > 0 {
 		limitPtr = &limit
 		offsetPtr = &offset
+	}
+
+	total := 0
+	if len(rows) > 0 {
+		if v, err := rows[0].Int("total_count"); err == nil {
+			total = int(v)
+		}
 	}
 
 	orders := make([]Order, 0, len(rows))
@@ -358,13 +352,20 @@ func (r *repo) GetForUser(ctx context.Context, orderID, userID int) (Order, erro
 }
 
 func (r *repo) UpdateStatus(ctx context.Context, orderID int, status OrderStatus) (Order, error) {
-	order, err := r.Get(ctx, orderID)
+	statusRows, err := r.db.Query(ctx, `SELECT status FROM orders WHERE id = ?`, orderID)
+	if err != nil {
+		return Order{}, err
+	}
+	if len(statusRows) == 0 {
+		return Order{}, fmt.Errorf("order %d: %w", orderID, apperrors.ErrNotFound)
+	}
+	current, err := statusRows[0].String("status")
 	if err != nil {
 		return Order{}, err
 	}
 
-	if !isValidTransition(order.Status, status) {
-		return Order{}, fmt.Errorf("invalid status transition from %s to %s", order.Status, status)
+	if !isValidTransition(OrderStatus(current), status) {
+		return Order{}, fmt.Errorf("invalid status transition from %s to %s", current, status)
 	}
 
 	_, err = r.db.Execute(ctx, `UPDATE orders SET status = ? WHERE id = ?`, string(status), orderID)
@@ -373,7 +374,7 @@ func (r *repo) UpdateStatus(ctx context.Context, orderID int, status OrderStatus
 	}
 
 	if status == StatusConfirmed {
-		r.db.Execute(ctx, `UPDATE orders SET verified_at = CURRENT_TIMESTAMP WHERE id = ?`, orderID)
+		_, _ = r.db.Execute(ctx, `UPDATE orders SET verified_at = CURRENT_TIMESTAMP WHERE id = ?`, orderID)
 	}
 
 	return r.Get(ctx, orderID)
@@ -387,19 +388,9 @@ func (r *repo) ListAllFilter(ctx context.Context, status string, limit, offset i
 		args = append(args, status)
 	}
 
-	countRows, err := r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders WHERE `+where, args...)
-	if err != nil {
-		return ListOrdersResponse{}, err
-	}
-	total := 0
-	if len(countRows) > 0 {
-		if v, err := countRows[0].Int("total"); err == nil {
-			total = int(v)
-		}
-	}
-
 	query := `
-		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
+		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at,
+			COUNT(*) OVER() AS total_count
 		FROM orders WHERE ` + where + ` ORDER BY id DESC
 	`
 	var queryArgs = make([]any, len(args))
@@ -420,6 +411,13 @@ func (r *repo) ListAllFilter(ctx context.Context, status string, limit, offset i
 		offsetPtr = &offset
 	}
 
+	total := 0
+	if len(rows) > 0 {
+		if v, err := rows[0].Int("total_count"); err == nil {
+			total = int(v)
+		}
+	}
+
 	orders := make([]Order, 0, len(rows))
 	for _, row := range rows {
 		o, err := rowToOrder(row)
@@ -434,32 +432,30 @@ func (r *repo) ListAllFilter(ctx context.Context, status string, limit, offset i
 func (r *repo) GetDashboardStats(ctx context.Context) (DashboardStats, error) {
 	var stats DashboardStats
 
-	rows, err := r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders`)
-	if err == nil && len(rows) > 0 {
-		if v, err := rows[0].Int("total"); err == nil {
-			stats.TotalOrders = int(v)
-		}
+	rows, err := r.db.Query(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM orders) AS total_orders,
+			(SELECT COUNT(*) FROM orders WHERE status = 'pending') AS pending_orders,
+			(SELECT COALESCE(SUM(total), 0.0) FROM orders WHERE created_at >= date('now', 'start of month')) AS revenue_month,
+			(SELECT COUNT(*) FROM users WHERE created_at >= date('now', 'start of month')) AS new_customers
+	`)
+	if err != nil {
+		return stats, err
 	}
-
-	rows, err = r.db.Query(ctx, `SELECT COUNT(*) AS total FROM orders WHERE status = 'pending'`)
-	if err == nil && len(rows) > 0 {
-		if v, err := rows[0].Int("total"); err == nil {
-			stats.PendingOrders = int(v)
-		}
+	if len(rows) == 0 {
+		return stats, nil
 	}
-
-	rows, err = r.db.Query(ctx, `SELECT COALESCE(SUM(total), 0) AS revenue FROM orders WHERE created_at >= date('now', 'start of month')`)
-	if err == nil && len(rows) > 0 {
-		if v, err := rows[0].Float("revenue"); err == nil {
-			stats.RevenueMonth = v
-		}
+	if v, err := rows[0].Int("total_orders"); err == nil {
+		stats.TotalOrders = int(v)
 	}
-
-	rows, err = r.db.Query(ctx, `SELECT COUNT(*) AS total FROM users WHERE created_at >= date('now', 'start of month')`)
-	if err == nil && len(rows) > 0 {
-		if v, err := rows[0].Int("total"); err == nil {
-			stats.NewCustomers = int(v)
-		}
+	if v, err := rows[0].Int("pending_orders"); err == nil {
+		stats.PendingOrders = int(v)
+	}
+	if v, err := rows[0].Float("revenue_month"); err == nil {
+		stats.RevenueMonth = v
+	}
+	if v, err := rows[0].Int("new_customers"); err == nil {
+		stats.NewCustomers = int(v)
 	}
 
 	return stats, nil

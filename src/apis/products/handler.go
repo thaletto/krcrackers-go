@@ -1,7 +1,6 @@
 package products
 
 import (
-	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -48,7 +47,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 // @Router       /admin/products [post]
 func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 	var input products.ProductInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}
@@ -168,7 +167,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 	}
 
 	var input products.ProductInput
-	if err := json.NewDecoder(r.Body).Decode(&input); err != nil {
+	if err := server.DecodeJSON(w, r, &input); err != nil {
 		server.WriteError(w, http.StatusBadRequest, "invalid request body")
 		return
 	}

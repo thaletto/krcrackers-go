@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sync"
 	"time"
 
 	"github.com/jung-kurt/gofpdf"
@@ -50,6 +51,9 @@ func (s *Service) GeneratePDF(ctx context.Context, orderID int) (GenerateResult,
 		Filename: fmt.Sprintf("invoice-%d.pdf", orderID),
 	}, nil
 }
+
+// bufPool reuses PDF output buffers across requests.
+var bufPool = sync.Pool{New: func() any { return new(bytes.Buffer) }}
 
 func formatInvoiceNumber(orderID int) string {
 	return fmt.Sprintf("INV-%04d", orderID)
@@ -98,9 +102,13 @@ func generatePDF(inv Invoice) []byte {
 	pdf.Cell(130, 7, "Total:")
 	pdf.Cell(30, 7, fmt.Sprintf("%.2f", inv.Total))
 
-	var buf bytes.Buffer
-	if err := pdf.Output(&buf); err != nil {
+	buf := bufPool.Get().(*bytes.Buffer)
+	buf.Reset()
+	defer bufPool.Put(buf)
+	if err := pdf.Output(buf); err != nil {
 		return nil
 	}
-	return buf.Bytes()
+	out := make([]byte, buf.Len())
+	copy(out, buf.Bytes())
+	return out
 }

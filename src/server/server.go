@@ -17,6 +17,18 @@ type StatusResponse struct {
 	Status string `json:"status"`
 }
 
+// MaxBodyBytes caps JSON request bodies to prevent oversized allocations.
+const MaxBodyBytes = 1 << 20
+
+// MaxUploadBytes caps multipart checkout bodies (form + screenshot).
+const MaxUploadBytes = 10 << 20
+
+// DecodeJSON decodes a capped JSON request body into v.
+func DecodeJSON(w http.ResponseWriter, r *http.Request, v any) error {
+	r.Body = http.MaxBytesReader(w, r.Body, MaxBodyBytes)
+	return json.NewDecoder(r.Body).Decode(v)
+}
+
 func WriteJSON(w http.ResponseWriter, status int, v any) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(status)
