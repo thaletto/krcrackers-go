@@ -42,8 +42,9 @@ type DB interface {
 }
 
 // Tx is a database transaction. Call Commit to persist, Rollback to discard.
-// SQLite adapters wrap *sql.Tx for real atomicity. D1 adapters buffer
-// statements and execute them on Commit (best-effort; not truly atomic).
+// SQLite adapters wrap *sql.Tx for real atomicity. D1 adapters run each
+// statement immediately and compensate on Rollback (best-effort; not truly
+// atomic).
 type Tx interface {
 	Query(ctx context.Context, sql string, params ...any) ([]Row, error)
 	Execute(ctx context.Context, sql string, params ...any) (Result, error)

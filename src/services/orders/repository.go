@@ -114,7 +114,11 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListOrdersResponse,
 		}
 		items = append(items, o)
 	}
-	return ListOrdersResponse{Items: items, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
+	populated, err := r.withItems(ctx, items)
+	if err != nil {
+		return ListOrdersResponse{}, err
+	}
+	return ListOrdersResponse{Items: populated, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
 }
 
 func (r *repo) Get(ctx context.Context, id int) (Order, error) {
@@ -272,6 +276,31 @@ func (r *repo) Checkout(ctx context.Context, input OrderInput) (Order, error) {
 	return Order{ID: orderID, OrderFields: input.OrderFields, Items: items}, nil
 }
 
+// withItems loads order_items for every order in a list response.
+// List queries select from orders only, so without this the Items field
+// stays empty and callers (e.g. item counts) report zero.
+func (r *repo) withItems(ctx context.Context, orders []Order) ([]Order, error) {
+	for i, o := range orders {
+		itemRows, err := r.db.Query(ctx, `
+			SELECT id, product_id, product_name, price, quantity, total
+			FROM order_items WHERE order_id = ? ORDER BY id
+		`, o.ID)
+		if err != nil {
+			return nil, err
+		}
+		items := make([]OrderItem, 0, len(itemRows))
+		for _, row := range itemRows {
+			item, err := rowToOrderItem(row)
+			if err != nil {
+				return nil, err
+			}
+			items = append(items, item)
+		}
+		orders[i].Items = items
+	}
+	return orders, nil
+}
+
 func (r *repo) ListForUser(ctx context.Context, userID int, limit, offset int) (ListOrdersResponse, error) {
 	query := `
 		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at,
@@ -311,7 +340,11 @@ func (r *repo) ListForUser(ctx context.Context, userID int, limit, offset int) (
 		}
 		orders = append(orders, o)
 	}
-	return ListOrdersResponse{Items: orders, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
+	populated, err := r.withItems(ctx, orders)
+	if err != nil {
+		return ListOrdersResponse{}, err
+	}
+	return ListOrdersResponse{Items: populated, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
 }
 
 func (r *repo) GetForUser(ctx context.Context, orderID, userID int) (Order, error) {
@@ -426,7 +459,11 @@ func (r *repo) ListAllFilter(ctx context.Context, status string, limit, offset i
 		}
 		orders = append(orders, o)
 	}
-	return ListOrdersResponse{Items: orders, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
+	populated, err := r.withItems(ctx, orders)
+	if err != nil {
+		return ListOrdersResponse{}, err
+	}
+	return ListOrdersResponse{Items: populated, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
 }
 
 func (r *repo) GetDashboardStats(ctx context.Context) (DashboardStats, error) {

@@ -77,73 +77,54 @@ func (c *d1Client) Close() error {
 }
 
 // d1Tx is a best-effort transaction adapter for D1's HTTP API.
-// Statements are buffered on Execute and sent in a single /batch Query
-// call on Commit (one HTTP round-trip instead of one per statement).
-// If any statement fails during Commit, cleanup is attempted for statements
-// that already succeeded (DELETE for INSERTs). This is not truly atomic —
-// a crash between successful statements leaves partial state.
+// D1 has no interactive transactions over HTTP, so every statement runs
+// immediately (one HTTP round-trip each) and Commit is a no-op. Successful
+// INSERTs are tracked so Rollback can delete them in reverse order as
+// compensation. This is not truly atomic — a crash between statements
+// leaves partial state.
 type d1Tx struct {
-	client *d1Client
-	ctx    context.Context
-	stmts  []d1TxStmt
-	ids    []int64
+	client  *d1Client
+	ctx     context.Context
+	inserts []d1Insert
 }
 
-type d1TxStmt struct {
-	sql    string
-	params []any
+type d1Insert struct {
+	table string
+	id    int64
 }
 
 func (t *d1Tx) Query(ctx context.Context, sql string, params ...any) ([]Row, error) {
 	return t.client.Query(ctx, sql, params...)
 }
 
-func (t *d1Tx) Execute(_ context.Context, sql string, params ...any) (Result, error) {
-	t.stmts = append(t.stmts, d1TxStmt{sql: sql, params: params})
-	return Result{}, nil
+func (t *d1Tx) Execute(ctx context.Context, sql string, params ...any) (Result, error) {
+	res, err := t.client.Execute(ctx, sql, params...)
+	if err != nil {
+		return Result{}, err
+	}
+	if id := res.LastInsertID; id > 0 && isInsertStmt(sql) {
+		if table := extractTableName(sql); table != "" {
+			t.inserts = append(t.inserts, d1Insert{table: table, id: id})
+		}
+	}
+	return res, nil
 }
 
 func (t *d1Tx) Commit() error {
-	if len(t.stmts) == 0 {
-		return nil
-	}
+	t.inserts = nil
+	return nil
+}
+
+func (t *d1Tx) Rollback() error {
 	ctx := t.ctx
 	if ctx == nil {
 		ctx = context.Background()
 	}
-	res, err := t.client.runBatch(ctx, t.stmts)
-	if err != nil {
-		return fmt.Errorf("d1 tx commit: %w", err)
+	for i := len(t.inserts) - 1; i >= 0; i-- {
+		ins := t.inserts[i]
+		_, _ = t.client.Execute(ctx, "DELETE FROM "+ins.table+" WHERE id = ?", ins.id)
 	}
-	if len(res.Result) != len(t.stmts) {
-		return fmt.Errorf("d1 tx commit: got %d results for %d statements", len(res.Result), len(t.stmts))
-	}
-	for i, r := range res.Result {
-		if !r.Success {
-			t.cleanup(ctx, i)
-			return fmt.Errorf("d1 tx commit: statement %d failed", i)
-		}
-		t.ids = append(t.ids, int64(r.Meta.LastRowID))
-	}
-	return nil
-}
-
-func (t *d1Tx) cleanup(ctx context.Context, failedAt int) {
-	for i := failedAt - 1; i >= 0; i-- {
-		stmt := t.stmts[i]
-		if isInsertStmt(stmt.sql) && i < len(t.ids) && t.ids[i] > 0 {
-			table := extractTableName(stmt.sql)
-			if table != "" {
-				_, _ = t.client.Execute(ctx,
-					"DELETE FROM "+table+" WHERE id = ?", t.ids[i])
-			}
-		}
-	}
-}
-
-func (t *d1Tx) Rollback() error {
-	t.stmts = nil
-	t.ids = nil
+	t.inserts = nil
 	return nil
 }
 
@@ -174,24 +155,6 @@ func (c *d1Client) run(ctx context.Context, sql string, params []any) (*paginati
 		Body: d1.DatabaseQueryParamsBodyD1SingleQuery{
 			Sql:    cloudflare.F(sql),
 			Params: cloudflare.F(paramsToStrings(params)),
-		},
-	})
-}
-
-// runBatch sends all statements in a single D1 batch Query call — one HTTP
-// round-trip regardless of statement count.
-func (c *d1Client) runBatch(ctx context.Context, stmts []d1TxStmt) (*pagination.SinglePage[d1.QueryResult], error) {
-	batch := make([]d1.DatabaseQueryParamsBodyMultipleQueriesBatch, len(stmts))
-	for i, stmt := range stmts {
-		batch[i] = d1.DatabaseQueryParamsBodyMultipleQueriesBatch{
-			Sql:    cloudflare.F(stmt.sql),
-			Params: cloudflare.F(paramsToStrings(stmt.params)),
-		}
-	}
-	return c.inner.D1.Database.Query(ctx, c.databaseID, d1.DatabaseQueryParams{
-		AccountID: cloudflare.F(c.accountID),
-		Body: d1.DatabaseQueryParamsBodyMultipleQueries{
-			Batch: cloudflare.F(batch),
 		},
 	})
 }
