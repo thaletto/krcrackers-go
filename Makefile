@@ -1,34 +1,50 @@
 DB_NAME    := krcrackers-products
 DUMP_FILE  := .data/prod.sql
 DB_FILE    := .data/dev.sqlite
+PORT       ?= 8080
 AIR        := $(shell command -v air 2>/dev/null || echo "$$(go env GOPATH 2>/dev/null)/bin/air")
 SWAG       := $(shell command -v swag 2>/dev/null || echo "$$(go env GOPATH 2>/dev/null)/bin/swag")
 ENV_FILE   := .env.production
 
+# Frees $(PORT) without matching process names. `pkill -f krcracker` also matches
+# the sibling frontend, whose path (krcrackers-fe) contains the same substring.
+FREE_PORT = @pids="$$(lsof -ti:$(PORT) 2>/dev/null)"; \
+	if [ -n "$$pids" ]; then kill $$pids 2>/dev/null || true; sleep 1; fi; \
+	pids="$$(lsof -ti:$(PORT) 2>/dev/null)"; \
+	if [ -n "$$pids" ]; then kill -9 $$pids 2>/dev/null || true; sleep 1; fi; \
+	echo "port $(PORT) free"
+
 .DEFAULT_GOAL := help
 
-.PHONY: help dev-db run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda deploy-env test test-endpoints bench load clean wrangler-login docs docs-update
+.PHONY: help dev-db dump run dev stop watch migrate-up migrate-down migrate-status build build-lambda deploy-lambda deploy-env test test-endpoints bench load clean wrangler-login docs docs-update
 
 help:                ## Show this help message
 	@echo "Targets:"
 	@grep -E '^[a-zA-Z_-]+:.*?## .*$$' $(MAKEFILE_LIST) | \
 		awk 'BEGIN {FS = ":.*?## "}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-dev-db:              ## Re-export prod D1 into .data/dev.sqlite (requires wrangler login)
+dev-db:              ## Re-export prod D1 into .data/dev.sqlite (requires CLOUDFLARE_* in .env)
 	@mkdir -p .data
-	@rm -f $(DUMP_FILE) $(DB_FILE)
-	wrangler d1 export $(DB_NAME) --remote --output=$(DUMP_FILE)
+	@# Export first: the previous ordering deleted the local database before the
+	@# export ran, so any export failure destroyed the working local copy.
+	go run ./src dump $(DUMP_FILE)
+	@rm -f $(DB_FILE) $(DB_FILE)-shm $(DB_FILE)-wal
 	sqlite3 $(DB_FILE) < $(DUMP_FILE)
-	@go run . migrate up
-	@echo "Imported $$(sqlite3 $(DB_FILE) "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'" | grep -v sqlite | wc -l | tr -d ' ') table(s) from $(DB_NAME) into $(DB_FILE)"
+	@# ./src, not .: the module root holds no Go files.
+	@go run ./src migrate up
+	@echo "Imported $(DB_NAME) -> $(DB_FILE): $$(sqlite3 $(DB_FILE) "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%'") table(s), $$(sqlite3 $(DB_FILE) 'SELECT COUNT(*) FROM products') products, $$(sqlite3 $(DB_FILE) 'SELECT COUNT(*) FROM users') users, $$(sqlite3 $(DB_FILE) 'SELECT COUNT(*) FROM orders') orders"
+
+dump:               ## Export prod D1 to .data/prod.sql without touching the local database
+	@mkdir -p .data
+	go run ./src dump $(DUMP_FILE)
 
 run:                 ## Start the dev server (uses .env / .env.local if present)
 	go run ./src
 
 dev: dev-db run      ## First-time / data-refresh: re-export then start
 
-stop:                ## Kill the running krcracker server (frees port :8080)
-	@pkill -f krcracker && echo "killed" || echo "no krcracker process running"
+stop:                ## Kill whatever holds :$(PORT) (frees the port)
+	$(FREE_PORT)
 
 watch: dev-db        ## Hot reload on .go changes (requires `go install github.com/air-verse/air@latest`)
 	@if [ ! -x "$(AIR)" ]; then \

@@ -18,7 +18,7 @@ type d1Client struct {
 	databaseID string
 }
 
-func newD1(cfg *D1Config) (DB, error) {
+func newD1(cfg *D1Config) (*d1Client, error) {
 	return &d1Client{
 		inner:      cloudflare.NewClient(option.WithAPIToken(cfg.APIToken)),
 		accountID:  cfg.AccountID,
@@ -27,29 +27,51 @@ func newD1(cfg *D1Config) (DB, error) {
 }
 
 func (c *d1Client) Query(ctx context.Context, sql string, params ...any) ([]Row, error) {
+	values, err := c.rawRows(ctx, sql, params...)
+	if err != nil {
+		return nil, err
+	}
+	rows := make([]Row, 0, len(values))
+	for _, m := range values {
+		rows = append(rows, &d1Row{values: m})
+	}
+	return rows, nil
+}
+
+// rawRows runs a query and returns each row as an untyped column-keyed map.
+// Unlike Query it imposes no type expectations, which is what the dev export
+// tool needs in order to reproduce values it has no schema knowledge of.
+func (c *d1Client) rawRows(ctx context.Context, sql string, params ...any) ([]map[string]any, error) {
 	res, err := c.run(ctx, sql, params)
 	if err != nil {
 		return nil, err
 	}
-
-	rows := make([]Row, 0)
+	out := make([]map[string]any, 0)
 	for _, r := range res.Result {
 		for _, row := range r.Results {
-			m, ok := row.(map[string]any)
-			if !ok {
-				b, err := json.Marshal(row)
-				if err != nil {
-					return nil, err
-				}
-				m = map[string]any{}
-				if err := json.Unmarshal(b, &m); err != nil {
-					return nil, err
-				}
+			m, err := coerceRow(row)
+			if err != nil {
+				return nil, err
 			}
-			rows = append(rows, &d1Row{values: m})
+			out = append(out, m)
 		}
 	}
-	return rows, nil
+	return out, nil
+}
+
+func coerceRow(row any) (map[string]any, error) {
+	if m, ok := row.(map[string]any); ok {
+		return m, nil
+	}
+	b, err := json.Marshal(row)
+	if err != nil {
+		return nil, err
+	}
+	m := map[string]any{}
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 
 func (c *d1Client) Execute(ctx context.Context, sql string, params ...any) (Result, error) {
