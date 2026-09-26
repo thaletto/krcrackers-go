@@ -29,7 +29,6 @@ func NewHandler(service *svc.Service) *Handler {
 
 // RegisterRoutes wires all order endpoints on the given mux.
 func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
-	mux.HandleFunc("POST /orders", h.create)
 	mux.HandleFunc("GET /orders", h.list)
 	mux.HandleFunc("GET /orders/{id}", h.get)
 	mux.HandleFunc("PUT /orders/{id}", h.update)
@@ -38,10 +37,16 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 	authMw := func(fn http.HandlerFunc) http.HandlerFunc {
 		return authapi.WithAuth(fn).ServeHTTP
 	}
+	// Checkout stays open to guests; a valid token just links the order to
+	// that account so it shows up in their order history.
+	optionalAuth := func(fn http.HandlerFunc) http.HandlerFunc {
+		return authapi.WithOptionalAuth(fn).ServeHTTP
+	}
 	adminAuth := func(fn http.HandlerFunc) http.HandlerFunc {
 		return authapi.WithAuth(authapi.WithAdmin(fn)).ServeHTTP
 	}
 
+	mux.HandleFunc("POST /orders", optionalAuth(h.create))
 	mux.HandleFunc("POST /orders/checkout", authMw(h.checkout))
 	mux.HandleFunc("GET /orders/my", authMw(h.listMyOrders))
 	mux.HandleFunc("GET /orders/my/{id}", authMw(h.getMyOrder))
@@ -55,7 +60,7 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 
 // Create godoc
 // @Summary      Create an order
-// @Description  Create a new order (admin/direct)
+// @Description  Create a new order. Guest checkout needs no session; a signed-in shopper's order is filed under their account
 // @Tags         orders
 // @Accept       json
 // @Produce      json
@@ -71,7 +76,14 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	order, err := h.svc.Create(r.Context(), input)
+	// Guests stay anonymous, but a signed-in shopper's order belongs to that
+	// account, which is what makes it visible in their order history.
+	ownerID := 0
+	if user := auth.GetUser(r); user != nil {
+		ownerID = user.ID
+	}
+
+	order, err := h.svc.Create(r.Context(), input, ownerID)
 	if err != nil {
 		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 		return

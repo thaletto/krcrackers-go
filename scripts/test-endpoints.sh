@@ -372,10 +372,16 @@ echo ""
 # ============================================
 echo -e "${YELLOW}--- Orders (Public) ---${NC}"
 
-# Create order
+# Create order. This is the endpoint the storefront uses for checkout, and the
+# cookie jar is a signed-in shopper, so the order must be filed under that
+# account.
 test_endpoint "POST" "/orders" 201 "Create order" \
     '{"userName":"Test User","email":"test@example.com","phone":"1111111111","street":"123 Main St","townOrCity":"Mumbai","state":"Maharashtra","pincode":"400001","deliveryRegion":"West","deliveryLocation":"Mumbai","total":99.99,"items":[{"productId":1,"productName":"Updated Product","price":99.99,"quantity":1,"total":99.99}]}' \
     "$COOKIE_JAR"
+
+# Create order with no session at all (guest checkout, no cookie file)
+test_endpoint "POST" "/orders" 201 "Create guest order" \
+    '{"userName":"Walkup Customer","email":"walkup@example.com","phone":"1111111111","street":"9 Guest St","townOrCity":"Mumbai","state":"Maharashtra","pincode":"400001","deliveryRegion":"West","deliveryLocation":"Mumbai","total":99.99,"items":[{"productId":1,"productName":"Updated Product","price":99.99,"quantity":1,"total":99.99}]}'
 
 # List orders
 test_endpoint "GET" "/orders" 200 "List orders" "" "$COOKIE_JAR"
@@ -406,17 +412,23 @@ test_multipart "/orders/checkout" 201 "Checkout" "$COOKIE_JAR" \
 # List my orders
 test_endpoint "GET" "/orders/my" 200 "List my orders" "" "$COOKIE_JAR"
 
-# Get my order
-test_endpoint "GET" "/orders/my/2" 200 "Get my order" "" "$COOKIE_JAR"
+# Order 1 was placed through /orders while signed in, order 2 is the checkout
+# above: both belong to the shopper. This is the regression the storefront hit -
+# order 1 used to be written without an owner, so it showed up in the admin
+# dashboard and in nobody's order history.
+test_endpoint "GET" "/orders/my/1" 200 "Get order placed while signed in" "" "$COOKIE_JAR"
 
-# Get someone else's order
-test_endpoint "GET" "/orders/my/1" 404 "Get someone else's order" "" "$COOKIE_JAR"
+# Get my checkout order
+test_endpoint "GET" "/orders/my/3" 200 "Get my order" "" "$COOKIE_JAR"
+
+# Order 2 was placed with no session, so it belongs to nobody
+test_endpoint "GET" "/orders/my/2" 404 "Get a guest order" "" "$COOKIE_JAR"
 
 # Cancel my order
-test_endpoint "DELETE" "/orders/my/2" 200 "Cancel my order" "" "$COOKIE_JAR"
+test_endpoint "DELETE" "/orders/my/3" 200 "Cancel my order" "" "$COOKIE_JAR"
 
 # Cancel already cancelled order
-test_endpoint "DELETE" "/orders/my/2" 422 "Cancel already cancelled order" "" "$COOKIE_JAR"
+test_endpoint "DELETE" "/orders/my/3" 422 "Cancel already cancelled order" "" "$COOKIE_JAR"
 echo ""
 
 # ============================================

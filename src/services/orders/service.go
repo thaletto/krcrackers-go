@@ -56,9 +56,20 @@ func NewService(
 }
 
 // Create persists a new order.
-func (s *Service) Create(ctx context.Context, input OrderInput) (Order, error) {
+//
+// ownerID files the order under a customer account so it shows up in that
+// customer's history; pass 0 for a guest order. The owner is taken from the
+// caller's session rather than the payload, so a client cannot file an order
+// under somebody else's account by setting userId in the body.
+func (s *Service) Create(ctx context.Context, input OrderInput, ownerID int) (Order, error) {
 	if err := ValidateOrderInput(input); err != nil {
 		return Order{}, err
+	}
+	if ownerID > 0 {
+		owner := ownerID
+		input.UserID = &owner
+	} else {
+		input.UserID = nil
 	}
 	return s.repo.Create(ctx, input)
 }

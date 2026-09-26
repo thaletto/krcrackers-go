@@ -192,8 +192,13 @@ func TestGoogleLinkingMigrationBackfillsLegacyGoogleAccounts(t *testing.T) {
 	if _, err := migrations.Up(ctx, db); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if err := migrations.Down(ctx, db); err != nil {
-		t.Fatalf("Down: %v", err)
+	// Roll back one step at a time: Down only reverts the newest migration, so
+	// a single step would land on whatever was added after 0004 and leave
+	// google_id in place.
+	for hasColumn(t, db, "users", "google_id") {
+		if err := migrations.Down(ctx, db); err != nil {
+			t.Fatalf("migrations.Down: %v", err)
+		}
 	}
 	if hasColumn(t, db, "users", "google_id") {
 		t.Fatal("users.google_id should be gone after the rollback")
@@ -318,4 +323,80 @@ func TestProductMetadataMigrationUpAndDown(t *testing.T) {
 	}
 
 	assertProductColumns(false, false)
+}
+
+// Orders written before the ownership fix carry a NULL user_id, which is why
+// they showed up in the admin dashboard but not in the shopper's own history.
+// Rolling back, planting rows in the pre-fix shape, and re-applying exercises
+// the backfill: an order whose email matches an account gets linked, one whose
+// email matches nobody stays a guest order.
+func TestGuestOrdersMigrationBackfillsOwnershipByEmail(t *testing.T) {
+	ctx := context.Background()
+	db := newTestDB(t)
+
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatalf("Up: %v", err)
+	}
+	if err := migrations.Down(ctx, db); err != nil {
+		t.Fatalf("Down: %v", err)
+	}
+
+	if _, err := db.Execute(ctx, `
+		INSERT INTO users (email, name, auth_provider, password_hash, role)
+		VALUES ('Shopper@Example.com', 'Shopper', 'email', '', 'customer')
+	`); err != nil {
+		t.Fatalf("insert user: %v", err)
+	}
+	// Account emails are not normalised on the way in, so the match has to be
+	// case-insensitive: this order is stored with different casing.
+	plantGuestOrder(t, db, "shopper@example.com")
+	plantGuestOrder(t, db, "walkup@example.com")
+
+	if _, err := migrations.Up(ctx, db); err != nil {
+		t.Fatalf("re-apply Up: %v", err)
+	}
+
+	owner := orderOwner(t, db, "shopper@example.com")
+	if owner == nil {
+		t.Error("order matching an account has user_id = NULL, want the account id (backfill skipped?)")
+	} else if *owner != 1 {
+		t.Errorf("order matching an account has user_id = %d, want 1", *owner)
+	}
+	if got := orderOwner(t, db, "walkup@example.com"); got != nil {
+		t.Errorf("order matching no account has user_id = %v, want NULL", *got)
+	}
+}
+
+func plantGuestOrder(t *testing.T, db database.DB, email string) {
+	t.Helper()
+	_, err := db.Execute(context.Background(), `
+		INSERT INTO orders (user_name, email, phone, street, town_or_city, state, pincode, delivery_region, delivery_location, total)
+		VALUES ('Shopper', ?, '9999999999', '1 Test Street', 'Mumbai', 'Maharashtra', '400001', 'West', 'Mumbai', 2500)
+	`, email)
+	if err != nil {
+		t.Fatalf("plant guest order for %s: %v", email, err)
+	}
+}
+
+func orderOwner(t *testing.T, db database.DB, email string) *int {
+	t.Helper()
+	// user_id IS NULL is asked of SQL rather than inferred from Int: a NULL
+	// column is not reliably reported as an error by the typed accessors.
+	rows, err := db.Query(context.Background(),
+		`SELECT user_id, user_id IS NULL AS unlinked FROM orders WHERE email = ?`, email)
+	if err != nil {
+		t.Fatalf("query order for %s: %v", email, err)
+	}
+	if len(rows) != 1 {
+		t.Fatalf("expected 1 order for %s, got %d", email, len(rows))
+	}
+	if unlinked, err := rows[0].Int("unlinked"); err != nil || unlinked != 0 {
+		return nil
+	}
+	id, err := rows[0].Int("user_id")
+	if err != nil {
+		t.Fatalf("read user_id: %v", err)
+	}
+	owner := int(id)
+	return &owner
 }

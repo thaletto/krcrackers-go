@@ -43,10 +43,13 @@ func (r *repo) Create(ctx context.Context, input OrderInput) (Order, error) {
 		status = StatusPending
 	}
 
+	// user_id is nullable: it stays NULL for guest checkout and is what
+	// /orders/my filters on, so an order placed by a signed-in shopper only
+	// appears in their history when it is recorded here.
 	res, err := tx.Execute(ctx, `
-		INSERT INTO orders (user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, string(status))
+		INSERT INTO orders (user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, status)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, input.UserID, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, string(status))
 	if err != nil {
 		_ = tx.Rollback()
 		return Order{}, fmt.Errorf("insert order: %w", err)
