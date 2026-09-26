@@ -8,26 +8,39 @@ import (
 )
 
 // User represents a user account with authentication details.
+//
+// AuthProvider records how the account was created ("email" or "google") and is
+// the value reported to clients. GoogleID is the linked Google subject ("" when
+// unlinked) and is independent of AuthProvider, so a password account can also
+// sign in with Google. PasswordHash is the bcrypt hash ("" for Google-only
+// accounts), which is what makes that second sign-in method possible.
 type User struct {
-	ID             int       `json:"id"`
-	Email          string    `json:"email"`
-	Name           string    `json:"name"`
-	Phone          string    `json:"phone"`
-	AvatarURL      string    `json:"avatarUrl"`
-	AuthProvider   string    `json:"authProvider"`
-	AuthProviderID string    `json:"-"`
-	PasswordHash   string    `json:"-"`
-	Role           string    `json:"role"`
-	CreatedAt      time.Time `json:"createdAt"`
-	UpdatedAt      time.Time `json:"updatedAt"`
+	ID           int       `json:"id"`
+	Email        string    `json:"email"`
+	Name         string    `json:"name"`
+	Phone        string    `json:"phone"`
+	AvatarURL    string    `json:"avatarUrl"`
+	AuthProvider string    `json:"authProvider"`
+	GoogleID     string    `json:"-"`
+	PasswordHash string    `json:"-"`
+	Role         string    `json:"role"`
+	CreatedAt    time.Time `json:"createdAt"`
+	UpdatedAt    time.Time `json:"updatedAt"`
 }
+
+// userColumns is the shared projection for user rows. Keeping it in one place
+// stops the SELECT lists and rowToUser from drifting apart.
+const userColumns = `id, email, name, phone, avatar_url, auth_provider, google_id, auth_provider_id, password_hash, role, created_at, updated_at`
 
 // Repository defines the data access interface for users and refresh tokens.
 type Repository interface {
-	Create(ctx context.Context, email, name, phone, authProvider, authProviderID, passwordHash, role string) (User, error)
+	Create(ctx context.Context, email, name, phone, authProvider, googleID, passwordHash, role string) (User, error)
 	GetByEmail(ctx context.Context, email string) (User, error)
-	GetByProviderID(ctx context.Context, provider, providerID string) (User, error)
+	GetByGoogleID(ctx context.Context, googleID string) (User, error)
 	GetByID(ctx context.Context, id int) (User, error)
+	// LinkGoogleID attaches a Google subject to an existing account, preserving
+	// the password hash so an already-registered email keeps working.
+	LinkGoogleID(ctx context.Context, id int, googleID string) (User, error)
 	Update(ctx context.Context, id int, name, phone string) (User, error)
 	CreateRefreshToken(ctx context.Context, userID int, token string, expiresAt time.Time) error
 	GetRefreshToken(ctx context.Context, token string) (userID int, expiresAt time.Time, err error)
@@ -44,11 +57,11 @@ func NewRepository(db database.DB) Repository {
 	return &repo{db: db}
 }
 
-func (r *repo) Create(ctx context.Context, email, name, phone, authProvider, authProviderID, passwordHash, role string) (User, error) {
+func (r *repo) Create(ctx context.Context, email, name, phone, authProvider, googleID, passwordHash, role string) (User, error) {
 	res, err := r.db.Execute(ctx, `
-		INSERT INTO users (email, name, phone, auth_provider, auth_provider_id, password_hash, role)
+		INSERT INTO users (email, name, phone, auth_provider, google_id, password_hash, role)
 		VALUES (?, ?, ?, ?, ?, ?, ?)
-	`, email, name, phone, authProvider, authProviderID, passwordHash, role)
+	`, email, name, phone, authProvider, googleID, passwordHash, role)
 	if err != nil {
 		return User{}, err
 	}
@@ -57,7 +70,7 @@ func (r *repo) Create(ctx context.Context, email, name, phone, authProvider, aut
 
 func (r *repo) GetByEmail(ctx context.Context, email string) (User, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, email, name, phone, avatar_url, auth_provider, auth_provider_id, password_hash, role, created_at, updated_at
+		SELECT `+userColumns+`
 		FROM users WHERE email = ?
 	`, email)
 	if err != nil {
@@ -69,11 +82,13 @@ func (r *repo) GetByEmail(ctx context.Context, email string) (User, error) {
 	return rowToUser(rows[0])
 }
 
-func (r *repo) GetByProviderID(ctx context.Context, provider, providerID string) (User, error) {
+// GetByGoogleID resolves a Google subject to its linked account. Unlinked
+// accounts store an empty or NULL google_id, so they never match.
+func (r *repo) GetByGoogleID(ctx context.Context, googleID string) (User, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, email, name, phone, avatar_url, auth_provider, auth_provider_id, password_hash, role, created_at, updated_at
-		FROM users WHERE auth_provider = ? AND auth_provider_id = ?
-	`, provider, providerID)
+		SELECT `+userColumns+`
+		FROM users WHERE google_id = ?
+	`, googleID)
 	if err != nil {
 		return User{}, err
 	}
@@ -85,7 +100,7 @@ func (r *repo) GetByProviderID(ctx context.Context, provider, providerID string)
 
 func (r *repo) GetByID(ctx context.Context, id int) (User, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, email, name, phone, avatar_url, auth_provider, auth_provider_id, password_hash, role, created_at, updated_at
+		SELECT `+userColumns+`
 		FROM users WHERE id = ?
 	`, id)
 	if err != nil {
@@ -95,6 +110,16 @@ func (r *repo) GetByID(ctx context.Context, id int) (User, error) {
 		return User{}, nil
 	}
 	return rowToUser(rows[0])
+}
+
+func (r *repo) LinkGoogleID(ctx context.Context, id int, googleID string) (User, error) {
+	_, err := r.db.Execute(ctx, `
+		UPDATE users SET google_id = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
+	`, googleID, id)
+	if err != nil {
+		return User{}, err
+	}
+	return r.GetByID(ctx, id)
 }
 
 func (r *repo) Update(ctx context.Context, id int, name, phone string) (User, error) {
@@ -171,7 +196,8 @@ func rowToUser(row database.Row) (User, error) {
 	if err != nil {
 		return User{}, err
 	}
-	authProviderID, err := row.String("auth_provider_id")
+	// Nullable: rows that predate the google_id column hold NULL there.
+	googleID, err := row.NullableString("google_id")
 	if err != nil {
 		return User{}, err
 	}
@@ -193,17 +219,20 @@ func rowToUser(row database.Row) (User, error) {
 	}
 	createdAt, _ := time.Parse(time.DateTime, createdAtStr)
 	updatedAt, _ := time.Parse(time.DateTime, updatedAtStr)
-	return User{
+	user := User{
 		ID:             int(id),
 		Email:          email,
 		Name:           name,
 		Phone:          phone,
 		AvatarURL:      avatarURL,
 		AuthProvider:   authProvider,
-		AuthProviderID: authProviderID,
 		PasswordHash:   passwordHash,
 		Role:           role,
 		CreatedAt:      createdAt,
 		UpdatedAt:      updatedAt,
-	}, nil
+	}
+	if googleID != nil {
+		user.GoogleID = *googleID
+	}
+	return user, nil
 }
