@@ -58,7 +58,7 @@ func NewRepository(db database.DB) Repository {
 
 func (r *repo) GetProfile(ctx context.Context, userID int) (auth.User, error) {
 	rows, err := r.db.Query(ctx, `
-		SELECT id, email, name, phone, avatar_url, auth_provider, auth_provider_id, password_hash, role, created_at, updated_at
+		SELECT id, email, name, phone, avatar_url, auth_provider, google_id, password_hash, role, created_at, updated_at
 		FROM users WHERE id = ?
 	`, userID)
 	if err != nil {
@@ -212,7 +212,8 @@ func rowToUser(row database.Row) (auth.User, error) {
 	if err != nil {
 		return auth.User{}, err
 	}
-	authProviderID, err := row.String("auth_provider_id")
+	// Nullable: rows that predate the google_id column hold NULL there.
+	googleID, err := row.NullableString("google_id")
 	if err != nil {
 		return auth.User{}, err
 	}
@@ -234,19 +235,22 @@ func rowToUser(row database.Row) (auth.User, error) {
 	}
 	createdAt, _ := time.Parse(time.DateTime, createdAtStr)
 	updatedAt, _ := time.Parse(time.DateTime, updatedAtStr)
-	return auth.User{
-		ID:             int(id),
-		Email:          email,
-		Name:           name,
-		Phone:          phone,
-		AvatarURL:      avatarURL,
-		AuthProvider:   authProvider,
-		AuthProviderID: authProviderID,
-		PasswordHash:   passwordHash,
-		Role:           role,
-		CreatedAt:      createdAt,
-		UpdatedAt:      updatedAt,
-	}, nil
+	user := auth.User{
+		ID:           int(id),
+		Email:        email,
+		Name:         name,
+		Phone:        phone,
+		AvatarURL:    avatarURL,
+		AuthProvider: authProvider,
+		PasswordHash: passwordHash,
+		Role:         role,
+		CreatedAt:    createdAt,
+		UpdatedAt:    updatedAt,
+	}
+	if googleID != nil {
+		user.GoogleID = *googleID
+	}
+	return user, nil
 }
 
 func rowToAddress(row database.Row) (Address, error) {

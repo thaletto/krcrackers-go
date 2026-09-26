@@ -6,6 +6,7 @@
 set -e
 
 BASE_URL="http://localhost:8080"
+PORT="${BASE_URL##*:}"
 COOKIE_JAR="/tmp/test-cookies.txt"
 ADMIN_COOKIE_JAR="/tmp/test-admin-cookies.txt"
 PASS=0
@@ -25,6 +26,11 @@ cleanup() {
     if [ -n "$SERVER_PID" ]; then
         kill $SERVER_PID 2>/dev/null || true
         wait $SERVER_PID 2>/dev/null || true
+    fi
+    # `go run` spawns the real server as a child, which can outlive the parent.
+    # Freeing the port catches that without matching on process names.
+    if declare -f free_port > /dev/null; then
+        free_port
     fi
     rm -f "$COOKIE_JAR" "$ADMIN_COOKIE_JAR"
 }
@@ -111,10 +117,22 @@ echo ""
 
 # Kill any existing server processes
 echo -e "${YELLOW}Stopping any existing server...${NC}"
-pkill -f "go run ./src" 2>/dev/null || true
-pkill -f "krcracker" 2>/dev/null || true
-sleep 2
-lsof -ti:8080 | xargs kill -9 2>/dev/null || true
+# Free the port rather than matching process names. `pkill -f krcracker` also
+# matches the sibling frontend, whose path (krcrackers-fe) contains the same
+# substring, so naming a process here takes the Next dev server down with it.
+free_port() {
+    local pids
+    pids="$(lsof -ti:"$PORT" 2>/dev/null || true)"
+    [ -z "$pids" ] && return 0
+    # shellcheck disable=SC2086
+    kill $pids 2>/dev/null || true
+    sleep 1
+    pids="$(lsof -ti:"$PORT" 2>/dev/null || true)"
+    [ -z "$pids" ] && return 0
+    # shellcheck disable=SC2086
+    kill -9 $pids 2>/dev/null || true
+}
+free_port
 sleep 1
 
 # Start server

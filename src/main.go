@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bufio"
 	"context"
 	"fmt"
 	"log"
@@ -8,6 +9,7 @@ import (
 	_ "net/http/pprof"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -19,6 +21,7 @@ import (
 	"github.com/thaletto/krcrackers-go/src/apis/products"
 	"github.com/thaletto/krcrackers-go/src/config"
 	"github.com/thaletto/krcrackers-go/src/database"
+	"github.com/thaletto/krcrackers-go/src/devdb"
 	"github.com/thaletto/krcrackers-go/src/eventbus"
 	"github.com/thaletto/krcrackers-go/src/migrations"
 	"github.com/thaletto/krcrackers-go/src/server"
@@ -40,11 +43,19 @@ import (
 // @in cookie
 // @name access_token
 func main() {
-	if len(os.Args) >= 2 && os.Args[1] == "migrate" {
-		if err := runMigrate(os.Args[2:]); err != nil {
-			log.Fatalf("migrate: %v", err)
+	if len(os.Args) >= 2 {
+		switch os.Args[1] {
+		case "migrate":
+			if err := runMigrate(os.Args[2:]); err != nil {
+				log.Fatalf("migrate: %v", err)
+			}
+			return
+		case "dump":
+			if err := runDump(os.Args[2:]); err != nil {
+				log.Fatalf("dump: %v", err)
+			}
+			return
 		}
-		return
 	}
 	runServer()
 }
@@ -95,6 +106,52 @@ func runMigrate(args []string) error {
 		}
 	default:
 		return fmt.Errorf("unknown migrate subcommand %q (expected up, down, status)", args[0])
+	}
+	return nil
+}
+
+// runDump exports the production D1 database to a SQL file. It targets the
+// remote database regardless of APP_ENV, so it works while the server runs
+// against local SQLite.
+func runDump(args []string) error {
+	if len(args) == 0 {
+		return fmt.Errorf("usage: dump <output.sql>")
+	}
+	// Load the env files for their side effect of populating the D1 vars.
+	if _, err := config.Load(); err != nil {
+		return err
+	}
+	dumper, err := database.NewDumper(config.D1Credentials())
+	if err != nil {
+		return err
+	}
+	defer dumper.Close()
+
+	file, err := os.Create(args[0])
+	if err != nil {
+		return err
+	}
+	defer file.Close()
+
+	// A large database takes a while to page through over HTTP.
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Minute)
+	defer cancel()
+
+	buf := bufio.NewWriter(file)
+	res, err := devdb.Export(ctx, dumper, buf)
+	if err != nil {
+		return err
+	}
+	if err := buf.Flush(); err != nil {
+		return err
+	}
+
+	fmt.Printf("dumped %d table(s) and %d row(s) to %s\n", res.Tables, res.Rows, args[0])
+	if len(res.Rebuilt) > 0 {
+		fmt.Printf("rebuilt virtual table(s) on load: %s\n", strings.Join(res.Rebuilt, ", "))
+	}
+	if len(res.SkippedNo) > 0 {
+		fmt.Printf("no columns reported, exported empty: %s\n", strings.Join(res.SkippedNo, ", "))
 	}
 	return nil
 }

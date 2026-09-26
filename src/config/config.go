@@ -109,6 +109,18 @@ func Load() (*Config, error) {
 	return cfg, nil
 }
 
+// D1Credentials returns the Cloudflare D1 credentials from the environment
+// regardless of APP_ENV. The server itself only uses them in production mode,
+// but tooling such as `go run ./src dump` needs to reach the remote database
+// while the server runs against local SQLite.
+func D1Credentials() database.D1Config {
+	return database.D1Config{
+		APIToken:   os.Getenv("CLOUDFLARE_API_TOKEN"),
+		AccountID:  os.Getenv("CLOUDFLARE_ACCOUNT_ID"),
+		DatabaseID: os.Getenv("CLOUDFLARE_DATABASE_ID"),
+	}
+}
+
 func getEnv(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v

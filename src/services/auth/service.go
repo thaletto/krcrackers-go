@@ -13,11 +13,14 @@ import (
 // Domain sentinels returned by the auth Service. The HTTP layer maps these
 // to status codes via errors.Is.
 var (
-	ErrEmailExists               = errors.New("email already registered")
-	ErrInvalidCredentials        = errors.New("invalid credentials")
-	ErrInvalidGoogleToken        = errors.New("invalid google id token")
-	ErrGoogleLoginUnavailable    = errors.New("google login is temporarily unavailable")
-	ErrGoogleAccountLinkRequired = errors.New("this email already has a password account; sign in with your password")
+	ErrEmailExists            = errors.New("email already registered")
+	ErrInvalidCredentials     = errors.New("invalid credentials")
+	ErrInvalidGoogleToken     = errors.New("invalid google id token")
+	ErrGoogleLoginUnavailable = errors.New("google login is temporarily unavailable")
+	// ErrGoogleAccountLinkRequired means the email is already linked to a
+	// different Google subject, so the link is ambiguous and cannot be made
+	// automatically.
+	ErrGoogleAccountLinkRequired = errors.New("this email is linked to a different google account; sign in with your password")
 	ErrNoRefreshToken            = errors.New("no refresh token")
 	ErrInvalidRefreshToken       = errors.New("invalid refresh token")
 	ErrRefreshExpired            = errors.New("refresh token expired")
@@ -102,8 +105,9 @@ func (s *Service) Login(ctx context.Context, email, password string) (AuthResult
 	return s.issueTokens(ctx, user)
 }
 
-// LoginWithGoogle authenticates with a Google ID token, auto-creating the
-// user if the email is new.
+// LoginWithGoogle authenticates with a Google ID token. A new email gets a new
+// account; an email that already has a password account is linked instead of
+// rejected, so both sign-in methods keep working.
 func (s *Service) LoginWithGoogle(ctx context.Context, idToken string) (AuthResult, error) {
 	if s.googleVerifier == nil {
 		return AuthResult{}, ErrGoogleLoginUnavailable
@@ -116,7 +120,7 @@ func (s *Service) LoginWithGoogle(ctx context.Context, idToken string) (AuthResu
 		return AuthResult{}, fmt.Errorf("%w: %s", ErrInvalidGoogleToken, err.Error())
 	}
 
-	user, err := s.repo.GetByProviderID(ctx, "google", identity.Subject)
+	user, err := s.repo.GetByGoogleID(ctx, identity.Subject)
 	if err != nil {
 		return AuthResult{}, fmt.Errorf("get user by Google subject: %w", err)
 	}
@@ -129,7 +133,7 @@ func (s *Service) LoginWithGoogle(ctx context.Context, idToken string) (AuthResu
 		return AuthResult{}, fmt.Errorf("get user: %w", err)
 	}
 	if user.ID != 0 {
-		return AuthResult{}, ErrGoogleAccountLinkRequired
+		return s.linkGoogle(ctx, user, identity)
 	}
 
 	user, err = s.repo.Create(ctx, identity.Email, identity.Name, "", "google", identity.Subject, "", "customer")
@@ -138,6 +142,26 @@ func (s *Service) LoginWithGoogle(ctx context.Context, idToken string) (AuthResu
 	}
 
 	return s.issueTokens(ctx, user)
+}
+
+// linkGoogle attaches a verified Google identity to an account that already
+// exists. The ID token carries a signature-checked, issuer-checked,
+// email_verified email, so an email match is proof that the caller controls
+// both credentials and linking cannot hand an account to a stranger. The
+// password hash is left untouched, so the existing password keeps working.
+//
+// A subject that is already linked to a different account is refused: two
+// Google accounts sharing an email means the link is ambiguous, and silently
+// reassigning it would let one Google identity take over the other.
+func (s *Service) linkGoogle(ctx context.Context, user User, identity GoogleIdentity) (AuthResult, error) {
+	if user.GoogleID != "" && user.GoogleID != identity.Subject {
+		return AuthResult{}, ErrGoogleAccountLinkRequired
+	}
+	linked, err := s.repo.LinkGoogleID(ctx, user.ID, identity.Subject)
+	if err != nil {
+		return AuthResult{}, fmt.Errorf("link google identity: %w", err)
+	}
+	return s.issueTokens(ctx, linked)
 }
 
 // Refresh rotates a refresh token: the old token is revoked, a new pair is
