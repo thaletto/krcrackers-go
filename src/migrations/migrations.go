@@ -188,19 +188,70 @@ func parseSections(content string) (up, down []string) {
 	return
 }
 
-// splitStatements splits a SQL string on `;` boundaries, ignoring lines that
-// are comments or blank. Note: this does not handle `;` inside string literals;
-// none of the current migrations rely on that, and DDL rarely does.
+// splitStatements splits a SQL string on `;` boundaries. Line comments are
+// stripped first (see stripLineComments) so that a statement preceded by a
+// comment is still executed. Note: this does not handle `;` inside string
+// literals; none of the current migrations rely on that, and DDL rarely does.
 func splitStatements(sql string) []string {
 	var out []string
-	for raw := range strings.SplitSeq(sql, ";") {
+	for raw := range strings.SplitSeq(stripLineComments(sql), ";") {
 		s := strings.TrimSpace(raw)
-		if s == "" || strings.HasPrefix(s, "--") {
+		if s == "" {
 			continue
 		}
 		out = append(out, s)
 	}
 	return out
+}
+
+// stripLineComments removes `--` line comments, leaving line structure intact.
+//
+// Comments must be removed rather than used to skip a chunk. A chunk that opens
+// with a comment also contains the statement that follows it, because `;` is what
+// separates them, so skipping the whole chunk silently discards that statement.
+// The failure is invisible: the migration reports as applied while the column or
+// table it created is missing.
+func stripLineComments(sql string) string {
+	var b strings.Builder
+	b.Grow(len(sql))
+
+	var quote byte
+	for i := 0; i < len(sql); i++ {
+		c := sql[i]
+		if quote != 0 {
+			b.WriteByte(c)
+			// A doubled quote is an escaped quote, not a terminator.
+			if c == quote {
+				if i+1 < len(sql) && sql[i+1] == quote {
+					b.WriteByte(quote)
+					i++
+					continue
+				}
+				quote = 0
+			}
+			continue
+		}
+		switch c {
+		case '\'', '"', '`':
+			quote = c
+			b.WriteByte(c)
+		case '-':
+			if i+1 < len(sql) && sql[i+1] != '-' {
+				b.WriteByte(c)
+				continue
+			}
+			for i < len(sql) && sql[i] != '\n' {
+				i++
+			}
+			// Keep the newline so tokens on either side stay separated.
+			if i < len(sql) {
+				b.WriteByte('\n')
+			}
+		default:
+			b.WriteByte(c)
+		}
+	}
+	return b.String()
 }
 
 func ensureVersionTable(ctx context.Context, db database.DB) error {
