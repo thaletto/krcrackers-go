@@ -38,7 +38,7 @@ Integer resource ID. `400` = Bad Request, `404` = Not Found.
 
 | Method | Endpoint | Summary | Body | Response |
 |--|-|||-|
-| `GET` | `/admin/dashboard` | Dashboard stats | - | `orders.DashboardStats` |
+| `GET` | `/admin/dashboard` | Dashboard stats | - | `orders.DashboardResponse` |
 | `GET` | `/admin/orders` | List all orders | - | `orders.ListOrdersResponse` |
 | `GET` | `/admin/orders/{id}` | Get order details | - | `orders.Order` |
 | `PATCH` | `/admin/orders/{id}/status` | Update order status | `{ "status": string }` | `orders.Order` |
@@ -80,13 +80,20 @@ Integer resource ID. `400` = Bad Request, `404` = Not Found.
 
 ## Orders (`/orders/*`)
 
+Every order read and write resolves against the calling actor: a shopper
+reaches only their own orders, an administrator reaches any. An order that is
+not the caller's returns `404`, the same as one that does not exist, so these
+routes cannot be used to probe for the existence of another account's orders.
+`POST /orders` is the one public route — a guest may place an order, and a
+signed-in shopper's order is filed under their account.
+
 | Method | Endpoint | Auth | Summary | Body | Response |
 |--|-||||-|
-| `GET` | `/orders` | No | List orders | - | `orders.ListOrdersResponse` |
+| `GET` | `/orders` | **Yes** | List orders | - | `orders.ListOrdersResponse` |
 | `POST` | `/orders` | No | Create order | `orders.OrderInput` | `orders.Order` |
-| `GET` | `/orders/{id}` | No | Get order | - | `orders.Order` |
-| `PUT` | `/orders/{id}` | No | Update order | `orders.OrderInput` | `orders.Order` |
-| `DELETE` | `/orders/{id}` | No | Delete order | - | `204` |
+| `GET` | `/orders/{id}` | **Yes** | Get order | - | `orders.Order` |
+| `PUT` | `/orders/{id}` | **Yes** | Update order | `orders.OrderInput` | `orders.Order` |
+| `DELETE` | `/orders/{id}` | **Yes** | Delete order | - | `204` |
 | `POST` | `/orders/checkout` | **Yes** | Checkout | `multipart/form-data`¹ | `orders.Order` |
 | `GET` | `/orders/my` | **Yes** | List my orders | - | `orders.ListOrdersResponse` |
 | `GET` | `/orders/my/{id}` | **Yes** | Get my order | - | `orders.Order` |
@@ -97,7 +104,9 @@ Integer resource ID. `400` = Bad Request, `404` = Not Found.
 
 
 ## Invoices (`/invoices/*`)
-**Auth required.**
+
+**Auth required.** The order is resolved against the calling actor, so
+`GET /invoices/{id}` returns `404` for an order that is not the caller's.
 
 | Method | Endpoint | Summary | Response |
 |--|-||-|
@@ -152,10 +161,12 @@ Integer resource ID. `400` = Bad Request, `404` = Not Found.
 { "items": [customers.Address], "total": 0 }
 ```
 
-### `orders.DashboardStats`
+### `orders.DashboardResponse`
 ```json
 { "totalOrders": 0, "pendingOrders": 0, "revenueMonth": 0, "newCustomers": 0 }
 ```
+// `newCustomers` is composed from the Account module (`auth` owns `users`);
+// the Order module itself only reports the first three figures.
 
 ### `orders.Order`
 ```json

@@ -23,7 +23,7 @@
 						"content": {
 							"application/json": {
 								"schema": {
-									"$ref": "#/components/schemas/orders.DashboardStats"
+									"$ref": "#/components/schemas/orders.DashboardResponse"
 								}
 							}
 						}
@@ -58,7 +58,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Download a PDF invoice for an order (admin)",
+				"description": "Download a PDF invoice for any order (admin)",
 				"tags": ["admin"],
 				"summary": "Get invoice PDF (admin)",
 				"parameters": [
@@ -80,6 +80,16 @@
 								"schema": {
 									"type": "string",
 									"format": "binary"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request",
+						"content": {
+							"application/pdf": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
 								}
 							}
 						}
@@ -345,7 +355,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Create a new product (admin only)",
+				"description": "Create a product as an administrator",
 				"tags": ["admin"],
 				"summary": "Create a product",
 				"requestBody": {
@@ -412,7 +422,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Update an existing product (admin only)",
+				"description": "Replace a product as an administrator",
 				"tags": ["admin"],
 				"summary": "Update a product",
 				"parameters": [
@@ -498,7 +508,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Delete a product by ID (admin only)",
+				"description": "Delete a product as an administrator",
 				"tags": ["admin"],
 				"summary": "Delete a product",
 				"parameters": [
@@ -548,6 +558,16 @@
 					},
 					"404": {
 						"description": "Not Found",
+						"content": {
+							"*/*": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Internal Server Error",
 						"content": {
 							"*/*": {
 								"schema": {
@@ -606,8 +626,28 @@
 							}
 						}
 					},
+					"409": {
+						"description": "Conflict",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
+								}
+							}
+						}
+					},
 					"422": {
 						"description": "Unprocessable Entity",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
+								}
+							}
+						}
+					},
+					"503": {
+						"description": "Service Unavailable",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -1196,7 +1236,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Download a PDF invoice for an order",
+				"description": "Download a PDF invoice for one of the caller's own orders",
 				"tags": ["invoices"],
 				"summary": "Get invoice PDF",
 				"parameters": [
@@ -1218,6 +1258,16 @@
 								"schema": {
 									"type": "string",
 									"format": "binary"
+								}
+							}
+						}
+					},
+					"400": {
+						"description": "Bad Request",
+						"content": {
+							"application/pdf": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
 								}
 							}
 						}
@@ -1247,7 +1297,12 @@
 		},
 		"/orders": {
 			"get": {
-				"description": "List all orders with pagination (admin)",
+				"security": [
+					{
+						"cookieAuth": []
+					}
+				],
+				"description": "List the orders the caller may see: their own, or every order for an administrator",
 				"tags": ["orders"],
 				"summary": "List orders",
 				"parameters": [
@@ -1279,6 +1334,16 @@
 							}
 						}
 					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
+								}
+							}
+						}
+					},
 					"500": {
 						"description": "Internal Server Error",
 						"content": {
@@ -1292,7 +1357,7 @@
 				}
 			},
 			"post": {
-				"description": "Create a new order (admin/direct)",
+				"description": "Create a new order. Guest checkout needs no session; a signed-in shopper's order is filed under their account",
 				"tags": ["orders"],
 				"summary": "Create an order",
 				"requestBody": {
@@ -1608,6 +1673,11 @@
 		},
 		"/orders/{id}": {
 			"get": {
+				"security": [
+					{
+						"cookieAuth": []
+					}
+				],
 				"description": "Get a single order by ID",
 				"tags": ["orders"],
 				"summary": "Get an order",
@@ -1643,6 +1713,16 @@
 							}
 						}
 					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
+								}
+							}
+						}
+					},
 					"404": {
 						"description": "Not Found",
 						"content": {
@@ -1656,7 +1736,12 @@
 				}
 			},
 			"put": {
-				"description": "Update an existing order by ID",
+				"security": [
+					{
+						"cookieAuth": []
+					}
+				],
+				"description": "Update an order the caller may edit",
 				"tags": ["orders"],
 				"summary": "Update an order",
 				"parameters": [
@@ -1694,6 +1779,16 @@
 							}
 						}
 					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
+								}
+							}
+						}
+					},
 					"404": {
 						"description": "Not Found",
 						"content": {
@@ -1717,7 +1812,12 @@
 				}
 			},
 			"delete": {
-				"description": "Delete an order by ID",
+				"security": [
+					{
+						"cookieAuth": []
+					}
+				],
+				"description": "Delete an order the caller may delete",
 				"tags": ["orders"],
 				"summary": "Delete an order",
 				"parameters": [
@@ -1745,6 +1845,16 @@
 							}
 						}
 					},
+					"401": {
+						"description": "Unauthorized",
+						"content": {
+							"*/*": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
+								}
+							}
+						}
+					},
 					"404": {
 						"description": "Not Found",
 						"content": {
@@ -1760,7 +1870,7 @@
 		},
 		"/products": {
 			"get": {
-				"description": "List products with optional search, filter, and sort",
+				"description": "List products with optional search, filter, sort, and pagination",
 				"tags": ["products"],
 				"summary": "List products",
 				"parameters": [
@@ -1773,7 +1883,7 @@
 						}
 					},
 					{
-						"description": "Filter by category",
+						"description": "Category",
 						"name": "category",
 						"in": "query",
 						"schema": {
@@ -1781,7 +1891,7 @@
 						}
 					},
 					{
-						"description": "Filter by brand",
+						"description": "Brand",
 						"name": "brand",
 						"in": "query",
 						"schema": {
@@ -1855,7 +1965,7 @@
 		},
 		"/products/{id}": {
 			"get": {
-				"description": "Get a single product by ID",
+				"description": "Get a product by ID",
 				"tags": ["products"],
 				"summary": "Get a product",
 				"parameters": [
@@ -1892,6 +2002,16 @@
 					},
 					"404": {
 						"description": "Not Found",
+						"content": {
+							"application/json": {
+								"schema": {
+									"$ref": "#/components/schemas/server.ErrorResponse"
+								}
+							}
+						}
+					},
+					"500": {
+						"description": "Internal Server Error",
 						"content": {
 							"application/json": {
 								"schema": {
@@ -2069,7 +2189,7 @@
 					}
 				}
 			},
-			"orders.DashboardStats": {
+			"orders.DashboardResponse": {
 				"type": "object",
 				"properties": {
 					"newCustomers": {
@@ -2310,10 +2430,10 @@
 					"comparePrice": {
 						"type": "number"
 					},
-					"description": {
+					"delivery": {
 						"type": "string"
 					},
-					"delivery": {
+					"description": {
 						"type": "string"
 					},
 					"id": {
@@ -2345,10 +2465,10 @@
 					"comparePrice": {
 						"type": "number"
 					},
-					"description": {
+					"delivery": {
 						"type": "string"
 					},
-					"delivery": {
+					"description": {
 						"type": "string"
 					},
 					"image": {

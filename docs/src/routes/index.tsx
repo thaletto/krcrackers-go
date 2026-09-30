@@ -1,137 +1,134 @@
 import { createFileRoute, Link } from "@tanstack/react-router";
-import { HomeLayout } from "fumadocs-ui/layouts/home";
-import { baseOptions } from "@/lib/layout.shared";
-import { Layers, Radio, Database, Box, Rocket, Code } from "lucide-react";
 
 export const Route = createFileRoute("/")({
 	component: Home,
 });
 
-const features = [
+const docs: { title: string; description: string; slug: string }[] = [
 	{
-		icon: Layers,
-		title: "Layered Architecture",
-		description:
-			"Clean separation between handlers, repositories, and database. Repository pattern with dependency injection.",
-		link: "architecture",
+		title: "Overview",
+		description: "What the backend does",
+		slug: "",
 	},
 	{
-		icon: Radio,
-		title: "Event-Driven",
-		description:
-			"In-memory pub/sub bus decouples services. Search syncs via Meilisearch, notifications via WhatsApp.",
-		link: "events",
+		title: "Setup",
+		description: "Local setup and configuration",
+		slug: "setup",
 	},
 	{
-		icon: Database,
-		title: "Dual Database",
-		description:
-			"SQLite in development, Cloudflare D1 in production. Same interface, zero code changes between environments.",
-		link: "database",
+		title: "Architecture",
+		description: "Layers, modules, and request flow",
+		slug: "architecture",
 	},
 	{
-		icon: Box,
-		title: "Domain Services",
-		description:
-			"Auth, Products, Orders, Customers, Invoices. Each with its own repository, handlers, and event publishing.",
-		link: "services",
+		title: "Services",
+		description: "Domain services and repositories",
+		slug: "services",
 	},
 	{
-		icon: Code,
-		title: "REST API",
-		description:
-			"33 endpoints with JWT auth, Google OAuth, file uploads, and interactive API playground.",
-		link: "architecture",
+		title: "Event System",
+		description: "In-memory pub/sub events",
+		slug: "events",
 	},
 	{
-		icon: Rocket,
-		title: "Dual Deploy",
-		description:
-			"Standalone HTTP server or AWS Lambda. Same handler, same code. ~200ms cold start on arm64.",
-		link: "deployment",
+		title: "Database",
+		description: "SQLite locally, D1 in production",
+		slug: "database",
+	},
+	{
+		title: "Deployment",
+		description: "Lambda deploys and environments",
+		slug: "deployment",
 	},
 ];
 
 function Home() {
 	return (
-		<HomeLayout {...baseOptions()}>
-			<div className="flex flex-col flex-1">
-				{/* Hero with Zed-style background pattern */}
-				<section className="relative overflow-hidden">
-					{/* Background pattern */}
-					<div className="absolute inset-0 -z-10">
-						{/* Base gradient */}
-						<div className="absolute inset-0 bg-linear-to-b from-fd-background via-fd-background to-fd-muted/30" />
-
-						{/* Grid pattern */}
-						<svg className="absolute inset-0 h-full w-full opacity-[0.03] dark:opacity-[0.05]">
-							<defs>
-								<pattern
-									id="grid"
-									width="40"
-									height="40"
-									patternUnits="userSpaceOnUse"
-								>
-									<path
-										d="M 40 0 L 0 0 0 40"
-										fill="none"
-										stroke="currentColor"
-										strokeWidth="1"
-									/>
-								</pattern>
-							</defs>
-							<rect width="100%" height="100%" fill="url(#grid)" />
-						</svg>
-					</div>
-
-					<div className="mx-auto max-w-4xl px-6 pt-24 pb-16 text-center">
-						<h1 className="font-bold text-5xl md:text-6xl tracking-tight mb-4">
-							KR Crackers
+		<main className="bg-background text-foreground flex min-h-screen flex-col pb-20 antialiased">
+			<div className="mx-auto w-full max-w-173 flex-1 px-4 pt-14">
+				<section aria-label="KR Crackers backend">
+					<div className="flex flex-col items-start">
+						<h1>
+							<img
+								src="/kr-crackers.svg"
+								alt="KR Crackers"
+								className="h-8 w-auto dark:invert"
+							/>
 						</h1>
-						<p className="text-fd-muted-foreground text-lg max-w-xl mx-auto mb-8">
-							Go-powered e-commerce backend with order lifecycle management,
-							product catalog, and admin dashboard.
+						<p className="mt-4 text-sm leading-relaxed text-muted-foreground sm:text-base">
+							A Go-powered e-commerce backend for order management, product
+							catalog, and admin dashboard, with dual SQLite/D1 storage and
+							event-driven services under the hood.
 						</p>
-						<div className="flex gap-3 justify-center">
+						<div className="mt-6 flex w-full flex-col gap-3 sm:w-auto sm:flex-row sm:items-center">
 							<Link
 								to="/docs/$"
 								params={{ _splat: "" }}
-								className="px-5 py-2.5 rounded-lg bg-fd-primary text-fd-primary-foreground font-medium text-sm"
+								className="bg-primary text-primary-foreground w-fit rounded-lg px-5 py-2 text-sm font-medium transition-transform duration-150 ease-out hover:opacity-90 active:scale-[0.96]"
 							>
-								Get Started
+								Get started
 							</Link>
 							<a
 								href="https://github.com/thaletto/krcrackers-go"
-								className="px-5 py-2.5 rounded-lg border bg-fd-background font-medium text-sm"
 								target="_blank"
 								rel="noopener noreferrer"
+								className="border-border bg-background w-fit rounded-lg border px-5 py-2 text-sm font-medium transition-colors hover:bg-accent hover:text-accent-foreground"
 							>
 								GitHub
 							</a>
 						</div>
 					</div>
 				</section>
-
-				{/* Features grid */}
-				<section className="border-t">
-					<div className="mx-auto max-w-5xl grid grid-cols-1 md:grid-cols-3 gap-px bg-fd-border">
-						{features.map((f) => (
-							<Link
-								key={f.title}
-								to="/docs/$"
-								params={{ _splat: f.link }}
-								className="group p-8 bg-fd-background hover:bg-fd-muted/50 transition-colors"
-							>
-								<f.icon className="w-5 h-5 mb-3 text-fd-muted-foreground" />
-								<h3 className="font-semibold mb-1">{f.title}</h3>
-								<p className="text-sm text-fd-muted-foreground leading-relaxed">
-									{f.description}
-								</p>
-							</Link>
+				<section className="mt-16 sm:mt-24">
+					<h2 className="section-tag-ruled text-sm font-medium sm:text-base">
+						<span>Docs</span>
+						<span className="section-tag-rule" aria-hidden="true" />
+					</h2>
+					<ul className="mt-2 flex flex-col">
+						{docs.map((d) => (
+							<li key={d.slug}>
+								<Link
+									to="/docs/$"
+									params={{ _splat: d.slug }}
+									className="group flex flex-wrap items-center gap-2 py-3.5"
+								>
+									<span className="min-w-0 text-sm font-medium text-foreground sm:text-base">
+										{d.title}
+									</span>
+									<span
+										aria-hidden="true"
+										className="hidden shrink-0 text-sm text-muted-foreground sm:inline"
+									>
+										/
+									</span>
+									<span className="min-w-0 basis-full truncate text-sm text-muted-foreground transition-colors duration-150 ease-out group-hover:text-foreground sm:basis-auto sm:flex-1">
+										{d.description}
+									</span>
+								</Link>
+							</li>
 						))}
-					</div>
+						<li>
+							<a
+								href="/openapi.json"
+								className="group flex flex-wrap items-center gap-2 py-3.5"
+							>
+								<span className="min-w-0 text-sm font-medium text-foreground sm:text-base">
+									API Reference
+								</span>
+								<span
+									aria-hidden="true"
+									className="hidden shrink-0 text-sm text-muted-foreground sm:inline"
+								>
+									/
+								</span>
+								<span className="min-w-0 basis-full truncate text-sm text-muted-foreground transition-colors duration-150 ease-out group-hover:text-foreground sm:basis-auto sm:flex-1">
+									Raw OpenAPI JSON spec
+								</span>
+							</a>
+						</li>
+					</ul>
 				</section>
 			</div>
-		</HomeLayout>
+		</main>
 	);
 }

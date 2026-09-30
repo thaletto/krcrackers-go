@@ -24,7 +24,7 @@
 					"200": {
 						"description": "OK",
 						"schema": {
-							"$ref": "#/definitions/orders.DashboardStats"
+							"$ref": "#/definitions/orders.DashboardResponse"
 						}
 					},
 					"401": {
@@ -49,7 +49,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Download a PDF invoice for an order (admin)",
+				"description": "Download a PDF invoice for any order (admin)",
 				"produces": ["application/pdf"],
 				"tags": ["admin"],
 				"summary": "Get invoice PDF (admin)",
@@ -67,6 +67,12 @@
 						"description": "OK",
 						"schema": {
 							"type": "file"
+						}
+					},
+					"400": {
+						"description": "Bad Request",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
 						}
 					},
 					"401": {
@@ -262,7 +268,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Create a new product (admin only)",
+				"description": "Create a product as an administrator",
 				"consumes": ["application/json"],
 				"produces": ["application/json"],
 				"tags": ["admin"],
@@ -319,7 +325,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Update an existing product (admin only)",
+				"description": "Replace a product as an administrator",
 				"consumes": ["application/json"],
 				"produces": ["application/json"],
 				"tags": ["admin"],
@@ -387,7 +393,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Delete a product by ID (admin only)",
+				"description": "Delete a product as an administrator",
 				"tags": ["admin"],
 				"summary": "Delete a product",
 				"parameters": [
@@ -423,6 +429,12 @@
 					},
 					"404": {
 						"description": "Not Found",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
+					"500": {
+						"description": "Internal Server Error",
 						"schema": {
 							"$ref": "#/definitions/server.ErrorResponse"
 						}
@@ -467,8 +479,20 @@
 							"$ref": "#/definitions/server.ErrorResponse"
 						}
 					},
+					"409": {
+						"description": "Conflict",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
 					"422": {
 						"description": "Unprocessable Entity",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
+					"503": {
+						"description": "Service Unavailable",
 						"schema": {
 							"$ref": "#/definitions/server.ErrorResponse"
 						}
@@ -936,7 +960,7 @@
 						"cookieAuth": []
 					}
 				],
-				"description": "Download a PDF invoice for an order",
+				"description": "Download a PDF invoice for one of the caller's own orders",
 				"produces": ["application/pdf"],
 				"tags": ["invoices"],
 				"summary": "Get invoice PDF",
@@ -956,6 +980,12 @@
 							"type": "file"
 						}
 					},
+					"400": {
+						"description": "Bad Request",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
 					"401": {
 						"description": "Unauthorized",
 						"schema": {
@@ -973,7 +1003,12 @@
 		},
 		"/orders": {
 			"get": {
-				"description": "List all orders with pagination (admin)",
+				"security": [
+					{
+						"cookieAuth": []
+					}
+				],
+				"description": "List the orders the caller may see: their own, or every order for an administrator",
 				"produces": ["application/json"],
 				"tags": ["orders"],
 				"summary": "List orders",
@@ -998,6 +1033,12 @@
 							"$ref": "#/definitions/orders.ListOrdersResponse"
 						}
 					},
+					"401": {
+						"description": "Unauthorized",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
 					"500": {
 						"description": "Internal Server Error",
 						"schema": {
@@ -1007,7 +1048,7 @@
 				}
 			},
 			"post": {
-				"description": "Create a new order (admin/direct)",
+				"description": "Create a new order. Guest checkout needs no session; a signed-in shopper's order is filed under their account",
 				"consumes": ["application/json"],
 				"produces": ["application/json"],
 				"tags": ["orders"],
@@ -1256,6 +1297,11 @@
 		},
 		"/orders/{id}": {
 			"get": {
+				"security": [
+					{
+						"cookieAuth": []
+					}
+				],
 				"description": "Get a single order by ID",
 				"produces": ["application/json"],
 				"tags": ["orders"],
@@ -1282,6 +1328,12 @@
 							"$ref": "#/definitions/server.ErrorResponse"
 						}
 					},
+					"401": {
+						"description": "Unauthorized",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
 					"404": {
 						"description": "Not Found",
 						"schema": {
@@ -1291,7 +1343,12 @@
 				}
 			},
 			"put": {
-				"description": "Update an existing order by ID",
+				"security": [
+					{
+						"cookieAuth": []
+					}
+				],
+				"description": "Update an order the caller may edit",
 				"consumes": ["application/json"],
 				"produces": ["application/json"],
 				"tags": ["orders"],
@@ -1327,6 +1384,12 @@
 							"$ref": "#/definitions/server.ErrorResponse"
 						}
 					},
+					"401": {
+						"description": "Unauthorized",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
 					"404": {
 						"description": "Not Found",
 						"schema": {
@@ -1342,7 +1405,12 @@
 				}
 			},
 			"delete": {
-				"description": "Delete an order by ID",
+				"security": [
+					{
+						"cookieAuth": []
+					}
+				],
+				"description": "Delete an order the caller may delete",
 				"tags": ["orders"],
 				"summary": "Delete an order",
 				"parameters": [
@@ -1364,6 +1432,12 @@
 							"$ref": "#/definitions/server.ErrorResponse"
 						}
 					},
+					"401": {
+						"description": "Unauthorized",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
 					"404": {
 						"description": "Not Found",
 						"schema": {
@@ -1375,7 +1449,7 @@
 		},
 		"/products": {
 			"get": {
-				"description": "List products with optional search, filter, and sort",
+				"description": "List products with optional search, filter, sort, and pagination",
 				"produces": ["application/json"],
 				"tags": ["products"],
 				"summary": "List products",
@@ -1388,13 +1462,13 @@
 					},
 					{
 						"type": "string",
-						"description": "Filter by category",
+						"description": "Category",
 						"name": "category",
 						"in": "query"
 					},
 					{
 						"type": "string",
-						"description": "Filter by brand",
+						"description": "Brand",
 						"name": "brand",
 						"in": "query"
 					},
@@ -1447,7 +1521,7 @@
 		},
 		"/products/{id}": {
 			"get": {
-				"description": "Get a single product by ID",
+				"description": "Get a product by ID",
 				"produces": ["application/json"],
 				"tags": ["products"],
 				"summary": "Get a product",
@@ -1475,6 +1549,12 @@
 					},
 					"404": {
 						"description": "Not Found",
+						"schema": {
+							"$ref": "#/definitions/server.ErrorResponse"
+						}
+					},
+					"500": {
+						"description": "Internal Server Error",
 						"schema": {
 							"$ref": "#/definitions/server.ErrorResponse"
 						}
@@ -1600,7 +1680,7 @@
 				}
 			}
 		},
-		"orders.DashboardStats": {
+		"orders.DashboardResponse": {
 			"type": "object",
 			"properties": {
 				"newCustomers": {
@@ -1841,10 +1921,10 @@
 				"comparePrice": {
 					"type": "number"
 				},
-				"description": {
+				"delivery": {
 					"type": "string"
 				},
-				"delivery": {
+				"description": {
 					"type": "string"
 				},
 				"id": {
@@ -1876,10 +1956,10 @@
 				"comparePrice": {
 					"type": "number"
 				},
-				"description": {
+				"delivery": {
 					"type": "string"
 				},
-				"delivery": {
+				"description": {
 					"type": "string"
 				},
 				"image": {

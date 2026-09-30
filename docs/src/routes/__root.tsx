@@ -34,6 +34,7 @@ function RootComponent() {
 				<HeadContent />
 			</head>
 			<body className="flex flex-col min-h-screen">
+				<div aria-hidden="true" className="paper-grain" />
 				<RootProvider>
 					<Outlet />
 				</RootProvider>
