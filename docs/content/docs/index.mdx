@@ -1,6 +1,6 @@
 ---
 title: Overview
-description: E-commerce backend for KR Crackers  order management, product catalog, and admin dashboard.
+description: E-commerce backend for KR Crackers order management, product catalog, and admin dashboard.
 icon: BookOpen
 ---
 
@@ -21,7 +21,7 @@ Go-powered e-commerce backend with order lifecycle management, product catalog, 
 
 | Layer | Technology |
 |-------|-----------|
-| Language | Go 1.22+ |
+| Language | Go 1.26+ |
 | Database | SQLite (dev) / Cloudflare D1 (prod) |
 | Search | SQLite FTS5 (built-in) |
 | Storage | Cloudflare R2 (S3-compatible) |
@@ -44,7 +44,7 @@ make run       # Start dev server on :8080
 | Auth | `/auth/*` | Public |
 | Customers | `/customers/*` | WithAuth |
 | Products | `/products/*` (reads), `/admin/products` (writes) | Public reads, admin writes |
-| Orders | `/orders/*`, `/orders/checkout` | Mixed |
+| Orders | `POST /orders` (public), `/orders/*`, `/orders/checkout` | POST public, rest WithAuth, actor-scoped |
 | Admin | `/admin/*` | WithAuth + WithAdmin |
 | Invoices | `/invoices/{id}` | WithAuth |
 

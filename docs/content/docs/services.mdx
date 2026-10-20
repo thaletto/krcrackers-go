@@ -1,10 +1,10 @@
 ---
 title: Services
-description: Domain services  each follows the Repository pattern with clean separation of concerns.
+description: Domain services, each follows the Repository pattern with clean separation of concerns.
 icon: Boxes
 ---
 
-Each service has two layers: **Repository** (SQL + row mapping) and **Service** (HTTP handlers that delegate to repository).
+Each service has two layers: **Repository** (SQL + row mapping) and **Service** (business logic). HTTP lives in `src/apis/`, whose handlers are thin adapters that decode the request, call the service, and encode the response.
 
 ## Service Overview
 
@@ -81,18 +81,23 @@ Catalog with full-text search via SQLite FTS5, filtering, and sorting.
 | `brand` | string | Filter by brand |
 | `min_price` | float | Minimum price |
 | `max_price` | float | Maximum price |
-| `sort` | string | `price_asc`, `price_desc`, `name_asc`, `name_desc` |
+| `sort` | string | `price_asc`, `price_desc` |
 | `limit` | int | Max results (0 = all) |
 | `offset` | int | Pagination offset |
 
 ## Orders
 
-Full order lifecycle: checkout → status updates → events.
+Full order lifecycle: checkout → status updates → events. Every read and write resolves against the calling actor: a shopper reaches only their own orders, an administrator reaches any. A stranger's order returns `404`, the same as one that does not exist.
 
 | Endpoint | Method | Auth | Description |
 |----------|--------|------|-------------|
+| `/orders` | POST | Public | Guest checkout (signed-in orders file under the account) |
+| `/orders` | GET | WithAuth | List the caller's orders |
+| `/orders/{id}` | GET | WithAuth | Get one of the caller's orders |
+| `/orders/{id}` | PUT | WithAuth | Update one of the caller's orders |
+| `/orders/{id}` | DELETE | WithAuth | Delete one of the caller's orders |
 | `/orders/checkout` | POST | WithAuth | Place order (multipart: address, items, screenshot) |
-| `/orders/my` | GET | WithAuth | List my orders |
+| `/orders/my` | GET | WithAuth | List my orders (same as `GET /orders`) |
 | `/orders/my/{id}` | GET | WithAuth | Get my order |
 | `/orders/my/{id}` | DELETE | WithAuth | Cancel pending order |
 | `/admin/orders` | GET | Admin | List all orders |

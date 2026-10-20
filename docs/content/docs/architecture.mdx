@@ -13,13 +13,13 @@ Clean layered architecture with event-driven pub/sub. Each service follows the R
 graph LR
   Client[HTTP Client] --> main[main.go]
   main --> mw[Auth Middleware]
-  mw --> handler[Service Handler]
-  handler --> repo[Repository]
+  mw --> api[API Handler - src/apis]
+  api --> svc[Service - src/services]
+  svc --> repo[Repository]
   repo --> db[(Database)]
-  handler --> bus[eventbus.Bus]
-  handler --> resp[HTTP Response]
+  svc --> bus[eventbus.Bus]
+  api --> resp[HTTP Response]
   bus --> notify[Notification Subscriber]
-  handler --> resp[HTTP Response]
 "
 />
 
@@ -29,7 +29,8 @@ graph LR
 |-------|------|--------------|
 | `server` | JSON helpers, request logging | Business logic, data access |
 | Auth middleware | JWT validation, user injection | Business logic |
-| Service handlers | HTTP decode/validate/respond, routing | SQL, transactions |
+| API handlers (`src/apis`) | HTTP decode/validate/respond, routing | SQL, transactions |
+| Services (`src/services`) | Business logic, orchestration | HTTP, SQL |
 | Repositories | SQL, row mapping, transactions | HTTP, validation |
 | `database` | `DB`/`Tx`/`Row` interfaces | SQL queries |
 | `eventbus` | Pub/sub, handler registration | Business logic |
@@ -49,16 +50,22 @@ type Repository interface {
 }
 ```
 
-**Service (handlers)**  thin HTTP adapters, delegate to repository:
+**Service**  owns business logic, calls the repository. It knows nothing about HTTP:
 
 ```go
 type Service struct {
     repo Repository
     bus  eventbus.Bus
 }
+```
 
-func (s *Service) RegisterRoutes(mux *http.ServeMux) {
-    mux.HandleFunc("POST /path", s.handler)
+**API handler (`src/apis`)**  thin HTTP adapter. It takes a narrow interface declared at the seam (never a `*Service` pointer), so handlers stay testable without a database:
+
+```go
+type Handler struct { svc Catalogue }
+
+func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
+    mux.HandleFunc("POST /path", h.handler)
 }
 ```
 
@@ -89,15 +96,7 @@ sequenceDiagram
 
 ## Middleware Chain
 
-<Mermaid
-  chart="
-flowchart LR
-  A[Request] --> B{WithOptionalAuth}
-  B --> C[WithAuth]
-  C --> D{WithAdmin}
-  D --> E[Handler]
-"
-/>
+Each route composes exactly the middleware it needs. The three wrappers are alternatives, not a chain:
 
 | Middleware | Purpose |
 |-----------|---------|
@@ -105,7 +104,9 @@ flowchart LR
 | `WithAdmin` | Requires `role=admin` after `WithAuth` |
 | `WithOptionalAuth` | Attaches user if present, proceeds unauthenticated if not |
 
+For example, `POST /orders` uses `WithOptionalAuth` (guest checkout), `GET /orders` uses `WithAuth`, and `GET /admin/orders` uses `WithAuth(WithAdmin(...))`.
+
 ## Known Risks
 
-- **D1 transactions not atomic**: `d1Tx.Commit()` executes sequentially; crash mid-commit leaves partial state
-- **No test files**: Zero `_test.go` files; regressions undetected
+- **D1 transactions not atomic**: the D1 HTTP API has no interactive transactions, so each statement executes immediately and `Rollback` only compensates the INSERTs it saw. A crash mid-commit leaves partial state.
+- **In-memory event bus**: events are lost on process restart and handlers have no retries, so subscribers must be idempotent.

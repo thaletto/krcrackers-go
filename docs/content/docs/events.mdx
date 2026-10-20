@@ -51,7 +51,7 @@ Each transition publishes an event for notification delivery.
 ## Usage
 
 ```go
-// Publishing
+// Publishing (returns nil; queue-full delivery is logged, not returned)
 bus.Publish(ctx, eventbus.Event{
     Name:    events.ProductCreated,
     Payload: events.ProductEvent{ID: p.ID, Name: p.Name},
@@ -69,28 +69,32 @@ bus.Subscribe(events.ProductCreated, func(ctx context.Context, event eventbus.Ev
 
 ```go
 type Bus interface {
-    Publish(ctx context.Context, event Event)
-    Subscribe(name string, handler Handler)
+    Publish(ctx context.Context, event Event) error
+    Subscribe(eventName string, handler Handler)
 }
 ```
 
-- Each handler runs in a **separate goroutine** with `context.Background()`
-- Handlers execute concurrently  no ordering guarantees
-- In-memory only  events are lost on process restart
-- No retry mechanism  handlers should be idempotent
+- Handlers run on a **bounded worker pool** (16 workers, 1024-deep queue), so a burst of publishes cannot spawn unbounded goroutines
+- Each job carries the publish call's context (falling back to `context.Background()` when nil)
+- Queue full: the handler runs in a fresh goroutine and the overflow is logged
+- Handler errors are logged, not retried — handlers should be idempotent
+- In-memory only — events are lost on process restart
+- No ordering guarantees across handlers
 
 ## Payload Types
 
 ```go
 type ProductEvent struct {
-    ID          int
-    Name        string
-    Description string
-    Price       float64
-    Brand       string
-    Category    string
-    Image       string
+    ID           int
+    Name         string
+    Description  string
+    Price        float64
+    Brand        string
+    Category     string
+    Image        string
     ComparePrice float64
+    Rating       *float64
+    Delivery     *string
 }
 
 type OrderEvent struct {

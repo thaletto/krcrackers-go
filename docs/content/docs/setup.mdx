@@ -6,7 +6,7 @@ icon: Settings
 
 ## Prerequisites
 
-- Go 1.22+
+- Go 1.26+
 - SQLite (installed automatically via `modernc.org/sqlite`)
 - `wrangler` CLI (for Cloudflare D1 access)
 
@@ -27,7 +27,7 @@ Copy `.env.example` to `.env` and configure:
 | Variable | Required | Default | Description |
 |----------|----------|---------|-------------|
 | `JWT_SECRET` | Yes |  | HMAC-SHA256 signing key (panics if empty) |
-| `APP_ENV` | No | `development` | `development` (SQLite) or `production` (D1) |
+| `APP_ENV` | No | `development` | `development` (SQLite) or `production` (D1). Unset + `CLOUDFLARE_API_TOKEN` present implies `production` |
 | `LOCAL_DB_PATH` | No | `.data/dev.sqlite` | SQLite file path |
 | `CLOUDFLARE_API_TOKEN` | Prod |  | Cloudflare API token |
 | `CLOUDFLARE_ACCOUNT_ID` | Prod |  | Cloudflare account ID |
@@ -36,8 +36,12 @@ Copy `.env.example` to `.env` and configure:
 | `R2_ACCESS_KEY_ID` | No |  | R2 access key |
 | `R2_SECRET_ACCESS_KEY` | No |  | R2 secret key |
 | `R2_BUCKET_NAME` | No |  | R2 bucket name |
+| `R2_PUBLIC_URL_BASE` | No |  | Public base URL for uploaded files |
+| `GOOGLE_OAUTH_CLIENT_ID` | No |  | Google OAuth web client ID (enables Google login) |
+| `WHATSAPP_API_TOKEN` | No |  | WhatsApp Cloud API access token |
 | `WHATSAPP_PHONE_NUMBER_ID` | No |  | WhatsApp Business phone number ID |
-| `WHATSAPP_ACCESS_TOKEN` | No |  | WhatsApp Cloud API access token |
+| `WHATSAPP_FROM_NUMBER` | No |  | WhatsApp sender number |
+| `PORT` | No | `8080` | HTTP server port |
 
 ## Make Targets
 
@@ -62,7 +66,7 @@ Copy `.env.example` to `.env` and configure:
 ### Standalone HTTP Server
 
 ```bash
-make run    # or: go run .
+make run    # or: go run ./src
 ```
 
 ### AWS Lambda
@@ -87,6 +91,11 @@ make watch
 
 `.env` (shared defaults) → `.env.local` (personal, gitignored). Loaded by `godotenv` at startup.
 
-## No Test Files
+## Tests
 
-There are zero `_test.go` files. `go test ./...` is a no-op. The `test-endpoints` script runs integration tests against a live server.
+All `_test.go` files live under `tests/...`, mirroring the package layout (e.g. tests for `src/services/auth/` go in `tests/services/auth/`). Nothing under `src/` has test files, so the blackbox boundary stays intact.
+
+```bash
+make test             # go test ./... (unit + blackbox tests)
+make test-endpoints   # starts server, runs 64 endpoint tests, cleans up
+```

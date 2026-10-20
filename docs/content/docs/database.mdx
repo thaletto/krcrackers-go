@@ -17,10 +17,11 @@ type DB interface {
 }
 
 type Row interface {
-    Int(name string) int
-    Float(name string) float64
-    String(name string) string
-    NullableString(name string) *string
+    Int(name string) (int64, error)
+    Float(name string) (float64, error)
+    NullableFloat(name string) (*float64, error)
+    String(name string) (string, error)
+    NullableString(name string) (*string, error)
 }
 ```
 
@@ -48,7 +49,7 @@ flowchart TB
 
 - HTTP API via `cloudflare-go/v7`
 - Requires `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_DATABASE_ID`
-- **Transactions are best-effort**: buffers statements, executes sequentially on commit
+- **Transactions are best-effort**: the HTTP API has no interactive transactions, so each statement executes immediately and `Rollback` only compensates the INSERTs it saw
 - Crash mid-commit leaves partial state
 
 <Callout type="warn">
@@ -76,16 +77,20 @@ make migrate-down     # Rollback latest
 make migrate-status   # Show applied/pending
 ```
 
-New migrations: add `migrations/NNNN_name.sql` with goose-style `-- +goose Up` / `-- +goose Down` sections. The runner embeds `*.sql` via `//go:embed`.
+New migrations: add `src/migrations/NNNN_name.sql` with goose-style `-- +goose Up` / `-- +goose Down` sections. The runner embeds `*.sql` via `//go:embed`.
 
 ## Type Safety
 
 The `Row` interface returns `TypeError` on type mismatch instead of silently returning zero values:
 
 ```go
-// Returns error if column is not an integer
-id := row.Int("id")
+// Every accessor returns (value, error): a column read the wrong way
+// yields a *TypeError instead of a silent zero value
+id, err := row.Int("id")
+if err != nil {
+    return err
+}
 
-// Returns nil if column is NULL
-name := row.NullableString("name")
+// Nullable accessors return nil for SQL NULL
+name, err := row.NullableString("name")
 ```

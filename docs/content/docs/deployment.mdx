@@ -1,6 +1,6 @@
 ---
 title: Deployment
-description: AWS Lambda deployment with Cloudflare D1, performance metrics, and SAM template.
+description: AWS Lambda deployment with Cloudflare D1 and performance metrics.
 icon: Cloud
 ---
 
@@ -28,36 +28,18 @@ make build-lambda    # GOOS=linux GOARCH=arm64 → bootstrap + lambda.zip
 make deploy-lambda   # Updates Lambda function
 ```
 
-### SAM Template
+### Deploy
 
-```yaml
-AWSTemplateFormatVersion: '2010-09-09'
-Transform: AWS::Serverless-2016-10-31
-
-Globals:
-  Function:
-    Timeout: 30
-    MemorySize: 128
-    Runtime: provided.al2023
-    Architectures:
-      - arm64
-
-Resources:
-  ApiFunction:
-    Type: AWS::Serverless::Function
-    Properties:
-      Handler: bootstrap
-      Events:
-        CatchAll:
-          Type: Api
-          Properties:
-            Path: /{proxy+}
-            Method: ANY
+```bash
+make build-lambda    # GOOS=linux GOARCH=arm64 → bootstrap + lambda.zip
+make deploy-lambda   # updates Lambda code + pushes .env.production via deploy-env
 ```
+
+There is no SAM template: deploys go through the AWS CLI. `deploy-env` reads `.env.production` and pushes its variables to the function's configuration.
 
 ### Environment Variables
 
-Set via Lambda console or SAM:
+Set via `deploy-env` (reads `.env.production`) or the Lambda console:
 
 ```
 JWT_SECRET=<your-secret>
