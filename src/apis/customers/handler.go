@@ -4,6 +4,7 @@
 package customers
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -14,13 +15,26 @@ import (
 	svc "github.com/thaletto/krcrackers-go/src/services/customers"
 )
 
-// Handler binds the customer HTTP routes to a services/customers.Service.
+// CustomerBook is what this handler needs from the customer module. Declaring
+// it here, at the seam that consumes it, keeps the HTTP layer testable without
+// a database and keeps the module's own surface free of handler concerns.
+type CustomerBook interface {
+	GetProfile(ctx context.Context, userID int) (auth.Profile, error)
+	UpdateProfile(ctx context.Context, userID int, name, phone string) (auth.Profile, error)
+	ListAddresses(ctx context.Context, userID int) ([]svc.Address, error)
+	CreateAddress(ctx context.Context, userID int, input svc.AddressInput) (svc.Address, error)
+	UpdateAddress(ctx context.Context, userID, addressID int, input svc.AddressInput) (svc.Address, error)
+	DeleteAddress(ctx context.Context, userID, addressID int) error
+	SetDefaultAddress(ctx context.Context, userID, addressID int) error
+}
+
+// Handler binds the customer HTTP routes to the customer module.
 type Handler struct {
-	svc *svc.Service
+	svc CustomerBook
 }
 
 // NewHandler creates a new customers HTTP handler.
-func NewHandler(service *svc.Service) *Handler {
+func NewHandler(service CustomerBook) *Handler {
 	return &Handler{svc: service}
 }
 
@@ -132,7 +146,7 @@ func (h *Handler) createAddress(w http.ResponseWriter, r *http.Request) {
 
 	addr, err := h.svc.CreateAddress(r.Context(), user.ID, input)
 	if err != nil {
-		if err.Error() == "street, city, state, and pincode are required" {
+		if errors.Is(err, svc.ErrAddressIncomplete) {
 			server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}
@@ -171,7 +185,7 @@ func (h *Handler) updateAddress(w http.ResponseWriter, r *http.Request) {
 
 	addr, err := h.svc.UpdateAddress(r.Context(), user.ID, id, input)
 	if err != nil {
-		if err.Error() == "street, city, state, and pincode are required" {
+		if errors.Is(err, svc.ErrAddressIncomplete) {
 			server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
 			return
 		}

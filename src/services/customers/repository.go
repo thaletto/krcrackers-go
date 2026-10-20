@@ -35,10 +35,16 @@ type AddressInput struct {
 	IsDefault bool   `json:"isDefault"`
 }
 
-// Repository defines the data access interface for customer profiles and addresses.
+// Accounts is the seam onto the Account module, which owns the users table.
+// The Customer module keeps addresses; a profile is an account, so it asks
+// rather than keeping a second copy of the users projection and row mapper.
+type Accounts interface {
+	Profile(ctx context.Context, userID int) (auth.Profile, error)
+	UpdateProfile(ctx context.Context, userID int, name, phone string) (auth.Profile, error)
+}
+
+// Repository defines the data access interface for customer addresses.
 type Repository interface {
-	GetProfile(ctx context.Context, userID int) (auth.User, error)
-	UpdateProfile(ctx context.Context, userID int, name, phone string) (auth.User, error)
 	ListAddresses(ctx context.Context, userID int) ([]Address, error)
 	GetAddress(ctx context.Context, userID, addressID int) (Address, error)
 	CreateAddress(ctx context.Context, userID int, input AddressInput) (Address, error)
@@ -54,30 +60,6 @@ type repo struct {
 // NewRepository returns a new customers repository backed by the given database.
 func NewRepository(db database.DB) Repository {
 	return &repo{db: db}
-}
-
-func (r *repo) GetProfile(ctx context.Context, userID int) (auth.User, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT id, email, name, phone, avatar_url, auth_provider, google_id, password_hash, role, created_at, updated_at
-		FROM users WHERE id = ?
-	`, userID)
-	if err != nil {
-		return auth.User{}, err
-	}
-	if len(rows) == 0 {
-		return auth.User{}, nil
-	}
-	return rowToUser(rows[0])
-}
-
-func (r *repo) UpdateProfile(ctx context.Context, userID int, name, phone string) (auth.User, error) {
-	_, err := r.db.Execute(ctx, `
-		UPDATE users SET name = ?, phone = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?
-	`, name, phone, userID)
-	if err != nil {
-		return auth.User{}, err
-	}
-	return r.GetProfile(ctx, userID)
 }
 
 func (r *repo) ListAddresses(ctx context.Context, userID int) ([]Address, error) {
@@ -108,16 +90,12 @@ func (r *repo) GetAddress(ctx context.Context, userID, addressID int) (Address, 
 		return Address{}, err
 	}
 	if len(rows) == 0 {
-		return Address{}, nil
+		return Address{}, ErrNotFound
 	}
 	return rowToAddress(rows[0])
 }
 
 func (r *repo) CreateAddress(ctx context.Context, userID int, input AddressInput) (Address, error) {
-	if input.IsDefault {
-		r.db.Execute(ctx, `UPDATE customer_addresses SET is_default = FALSE WHERE user_id = ?`, userID)
-	}
-
 	country := input.Country
 	if country == "" {
 		country = "India"
@@ -127,26 +105,68 @@ func (r *repo) CreateAddress(ctx context.Context, userID int, input AddressInput
 		label = "Home"
 	}
 
-	res, err := r.db.Execute(ctx, `
+	// Clearing the previous default and inserting the new one share a
+	// transaction: if the insert fails the customer keeps the default they had,
+	// rather than being left with none.
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Address{}, err
+	}
+	if input.IsDefault {
+		if _, err := tx.Execute(ctx, `UPDATE customer_addresses SET is_default = FALSE WHERE user_id = ?`, userID); err != nil {
+			_ = tx.Rollback()
+			return Address{}, err
+		}
+	}
+
+	res, err := tx.Execute(ctx, `
 		INSERT INTO customer_addresses (user_id, label, street, city, state, pincode, country, is_default)
 		VALUES (?, ?, ?, ?, ?, ?, ?, ?)
 	`, userID, label, input.Street, input.City, input.State, input.Pincode, country, input.IsDefault)
 	if err != nil {
+		_ = tx.Rollback()
+		return Address{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Address{}, err
 	}
 	return r.GetAddress(ctx, userID, int(res.LastInsertID))
 }
 
 func (r *repo) UpdateAddress(ctx context.Context, userID, addressID int, input AddressInput) (Address, error) {
-	if input.IsDefault {
-		r.db.Execute(ctx, `UPDATE customer_addresses SET is_default = FALSE WHERE user_id = ?`, userID)
+	country := input.Country
+	if country == "" {
+		country = "India"
 	}
 
-	_, err := r.db.Execute(ctx, `
+	// RowsAffected is the ownership check. Without it a write aimed at another
+	// owner's address reports success and returns a zero-valued address.
+	owned, err := r.db.Query(ctx, `SELECT id FROM customer_addresses WHERE id = ? AND user_id = ?`, addressID, userID)
+	if err != nil {
+		return Address{}, err
+	}
+	if len(owned) == 0 {
+		return Address{}, ErrNotFound
+	}
+
+	tx, err := r.db.Begin(ctx)
+	if err != nil {
+		return Address{}, err
+	}
+	if input.IsDefault {
+		if _, err := tx.Execute(ctx, `UPDATE customer_addresses SET is_default = FALSE WHERE user_id = ?`, userID); err != nil {
+			_ = tx.Rollback()
+			return Address{}, err
+		}
+	}
+	if _, err := tx.Execute(ctx, `
 		UPDATE customer_addresses SET label = ?, street = ?, city = ?, state = ?, pincode = ?, country = ?, is_default = ?, updated_at = CURRENT_TIMESTAMP
 		WHERE id = ? AND user_id = ?
-	`, input.Label, input.Street, input.City, input.State, input.Pincode, input.Country, input.IsDefault, addressID, userID)
-	if err != nil {
+	`, input.Label, input.Street, input.City, input.State, input.Pincode, country, input.IsDefault, addressID, userID); err != nil {
+		_ = tx.Rollback()
+		return Address{}, err
+	}
+	if err := tx.Commit(); err != nil {
 		return Address{}, err
 	}
 	return r.GetAddress(ctx, userID, addressID)
@@ -164,94 +184,32 @@ func (r *repo) DeleteAddress(ctx context.Context, userID, addressID int) error {
 }
 
 func (r *repo) SetDefaultAddress(ctx context.Context, userID, addressID int) error {
+	// Confirm the address is the caller's before clearing anything: a rejected
+	// set-default must not leave the customer with no default at all.
+	owned, err := r.db.Query(ctx, `SELECT id FROM customer_addresses WHERE id = ? AND user_id = ?`, addressID, userID)
+	if err != nil {
+		return err
+	}
+	if len(owned) == 0 {
+		return ErrNotFound
+	}
+
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return err
 	}
-	_, err = tx.Execute(ctx, `UPDATE customer_addresses SET is_default = FALSE WHERE user_id = ?`, userID)
-	if err != nil {
-		tx.Rollback()
+	if _, err := tx.Execute(ctx, `UPDATE customer_addresses SET is_default = FALSE WHERE user_id = ?`, userID); err != nil {
+		_ = tx.Rollback()
 		return err
 	}
-	res, err := tx.Execute(ctx, `UPDATE customer_addresses SET is_default = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`, addressID, userID)
-	if err != nil {
-		tx.Rollback()
+	if _, err := tx.Execute(ctx, `UPDATE customer_addresses SET is_default = TRUE, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND user_id = ?`, addressID, userID); err != nil {
+		_ = tx.Rollback()
 		return err
-	}
-	if res.RowsAffected == 0 {
-		tx.Rollback()
-		return ErrNotFound
 	}
 	return tx.Commit()
 }
 
 var ErrNotFound = fmt.Errorf("not found")
-
-func rowToUser(row database.Row) (auth.User, error) {
-	id, err := row.Int("id")
-	if err != nil {
-		return auth.User{}, err
-	}
-	email, err := row.String("email")
-	if err != nil {
-		return auth.User{}, err
-	}
-	name, err := row.String("name")
-	if err != nil {
-		return auth.User{}, err
-	}
-	phone, err := row.String("phone")
-	if err != nil {
-		return auth.User{}, err
-	}
-	avatarURL, err := row.String("avatar_url")
-	if err != nil {
-		return auth.User{}, err
-	}
-	authProvider, err := row.String("auth_provider")
-	if err != nil {
-		return auth.User{}, err
-	}
-	// Nullable: rows that predate the google_id column hold NULL there.
-	googleID, err := row.NullableString("google_id")
-	if err != nil {
-		return auth.User{}, err
-	}
-	passwordHash, err := row.String("password_hash")
-	if err != nil {
-		return auth.User{}, err
-	}
-	role, err := row.String("role")
-	if err != nil {
-		return auth.User{}, err
-	}
-	createdAtStr, err := row.String("created_at")
-	if err != nil {
-		return auth.User{}, err
-	}
-	updatedAtStr, err := row.String("updated_at")
-	if err != nil {
-		return auth.User{}, err
-	}
-	createdAt, _ := time.Parse(time.DateTime, createdAtStr)
-	updatedAt, _ := time.Parse(time.DateTime, updatedAtStr)
-	user := auth.User{
-		ID:           int(id),
-		Email:        email,
-		Name:         name,
-		Phone:        phone,
-		AvatarURL:    avatarURL,
-		AuthProvider: authProvider,
-		PasswordHash: passwordHash,
-		Role:         role,
-		CreatedAt:    createdAt,
-		UpdatedAt:    updatedAt,
-	}
-	if googleID != nil {
-		user.GoogleID = *googleID
-	}
-	return user, nil
-}
 
 func rowToAddress(row database.Row) (Address, error) {
 	id, err := row.Int("id")

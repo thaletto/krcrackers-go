@@ -5,7 +5,6 @@ package customers
 import (
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/thaletto/krcrackers-go/src/services/auth"
 )
@@ -17,36 +16,64 @@ type ListAddressesResponse struct {
 }
 
 // Service owns the business operations for customer profiles and addresses.
-// It is HTTP-agnostic; the apis/customers package adapts it to routes.
+// A profile belongs to the Account module and is read through the Accounts
+// seam; this module owns addresses. It is HTTP-agnostic; the apis/customers
+// package adapts it to routes.
 type Service struct {
-	repo Repository
+	repo    Repository
+	account Accounts
 }
 
-// NewService creates a new customers service.
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+// NewService creates a new customers service over an address repository and
+// the Account module that owns profiles.
+func NewService(repo Repository, account Accounts) *Service {
+	return &Service{repo: repo, account: account}
 }
 
-// GetProfile returns the customer record (auth.User) for the given user.
-func (s *Service) GetProfile(ctx context.Context, userID int) (auth.User, error) {
-	profile, err := s.repo.GetProfile(ctx, userID)
+// GetProfile returns the customer record for the given user. A missing account
+// is reported as ErrNotFound so the HTTP layer maps it like a missing address.
+func (s *Service) GetProfile(ctx context.Context, userID int) (auth.Profile, error) {
+	profile, err := s.account.Profile(ctx, userID)
 	if err != nil {
-		return auth.User{}, err
-	}
-	if profile.ID == 0 {
-		return auth.User{}, ErrNotFound
+		if errors.Is(err, auth.ErrUserNotFound) {
+			return auth.Profile{}, ErrNotFound
+		}
+		return auth.Profile{}, err
 	}
 	return profile, nil
 }
 
 // UpdateProfile updates the customer's name and phone.
-func (s *Service) UpdateProfile(ctx context.Context, userID int, name, phone string) (auth.User, error) {
-	return s.repo.UpdateProfile(ctx, userID, name, phone)
+func (s *Service) UpdateProfile(ctx context.Context, userID int, name, phone string) (auth.Profile, error) {
+	profile, err := s.account.UpdateProfile(ctx, userID, name, phone)
+	if err != nil {
+		if errors.Is(err, auth.ErrUserNotFound) {
+			return auth.Profile{}, ErrNotFound
+		}
+		return auth.Profile{}, err
+	}
+	return profile, nil
 }
 
 // ListAddresses returns all addresses for the given customer.
 func (s *Service) ListAddresses(ctx context.Context, userID int) ([]Address, error) {
 	return s.repo.ListAddresses(ctx, userID)
+}
+
+// AddressFor returns one of the given customer's own addresses. An address
+// belonging to somebody else is ErrNotFound, the same as one that does not
+// exist, so a caller cannot use this to discover another account's addresses.
+// Other modules that need a delivery address come through here rather than
+// querying customer_addresses themselves.
+func (s *Service) AddressFor(ctx context.Context, userID, addressID int) (Address, error) {
+	addr, err := s.repo.GetAddress(ctx, userID, addressID)
+	if err != nil {
+		if errors.Is(err, ErrNotFound) {
+			return Address{}, ErrNotFound
+		}
+		return Address{}, err
+	}
+	return addr, nil
 }
 
 // CreateAddress validates and persists a new address.
@@ -91,11 +118,18 @@ func (s *Service) SetDefaultAddress(ctx context.Context, userID, addressID int) 
 	return err
 }
 
+// ErrAddressIncomplete is returned when a new or updated address is missing one
+// of the four fields needed to deliver to it. It is a sentinel rather than a
+// formatted string so the HTTP layer can match it with errors.Is: the handler
+// used to compare err.Error() against this exact text, which meant rewording
+// the message silently turned a 422 into a 500.
+var ErrAddressIncomplete = errors.New("street, city, state, and pincode are required")
+
 // ValidateAddressInput checks the minimal required fields on a new or
 // updated address.
 func ValidateAddressInput(input AddressInput) error {
 	if input.Street == "" || input.City == "" || input.State == "" || input.Pincode == "" {
-		return fmt.Errorf("street, city, state, and pincode are required")
+		return ErrAddressIncomplete
 	}
 	return nil
 }

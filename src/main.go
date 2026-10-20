@@ -214,7 +214,7 @@ func newHandler(db database.DB, cfg *config.Config) http.Handler {
 	authHandler := authapi.NewHandler(authSvc, cfg.IsProduction)
 
 	customersRepo := customers.NewRepository(db)
-	customersSvc := customers.NewService(customersRepo)
+	customersSvc := customers.NewService(customersRepo, authSvc)
 	customersHandler := customersapi.NewHandler(customersSvc)
 
 	notifSvc := notifications.NewWhatsAppService(cfg.WhatsApp.APIToken, cfg.WhatsApp.PhoneNumberID, cfg.WhatsApp.FromNumber)

@@ -6,6 +6,7 @@
 package auth
 
 import (
+	"context"
 	"errors"
 	"net/http"
 
@@ -13,16 +14,28 @@ import (
 	svc "github.com/thaletto/krcrackers-go/src/services/auth"
 )
 
-// Handler binds the auth HTTP routes to a services/auth.Service.
+// Credentials is what this handler needs from the account module. Declaring it
+// here, at the seam that consumes it, keeps the HTTP layer testable without a
+// database and keeps the module's own surface free of handler concerns.
+type Credentials interface {
+	Register(ctx context.Context, email, password, name, phone string) (svc.AuthResult, error)
+	Login(ctx context.Context, email, password string) (svc.AuthResult, error)
+	LoginWithGoogle(ctx context.Context, idToken string) (svc.AuthResult, error)
+	Refresh(ctx context.Context, refreshToken string) (svc.AuthResult, error)
+	Logout(ctx context.Context, refreshToken string) error
+	GetMe(ctx context.Context, userID int) (svc.User, error)
+}
+
+// Handler binds the auth HTTP routes to the account module.
 type Handler struct {
-	svc      *svc.Service
+	svc      Credentials
 	isSecure bool
 }
 
 // NewHandler creates a new auth HTTP handler. isSecure controls the
 // Secure flag on the access_token and refresh_token cookies; pass true
 // in production.
-func NewHandler(service *svc.Service, isSecure bool) *Handler {
+func NewHandler(service Credentials, isSecure bool) *Handler {
 	return &Handler{svc: service, isSecure: isSecure}
 }
 
@@ -63,7 +76,6 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		server.WriteError(w, http.StatusUnprocessableEntity, "email and password are required")
 		return
 	}
-
 	// The length bounds are a client mistake, so they are reported as one. Left
 	// to the module they surfaced as a 500 from bcrypt's opaque length error.
 	if err := svc.ValidatePassword(input.Password); err != nil {
@@ -172,7 +184,7 @@ func (h *Handler) googleLogin(w http.ResponseWriter, r *http.Request) {
 			server.WriteError(w, http.StatusUnauthorized, svc.ErrInvalidGoogleToken.Error())
 			return
 		}
-		server.WriteError(w, http.StatusInternalServerError, "failed to login with google")
+		server.WriteInternalError(w, err)
 		return
 	}
 

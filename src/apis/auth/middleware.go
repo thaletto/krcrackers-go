@@ -13,6 +13,10 @@ import (
 	"github.com/thaletto/krcrackers-go/src/services/auth"
 )
 
+// RoleAdmin is the role an account must hold to act on records belonging to
+// other accounts.
+const RoleAdmin = "admin"
+
 // WithAuth returns middleware that validates the JWT access token from
 // cookies or Authorization header and injects the user into context.
 func WithAuth(next http.Handler) http.Handler {
@@ -42,7 +46,7 @@ func WithAuth(next http.Handler) http.Handler {
 func WithAdmin(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		user, ok := r.Context().Value(auth.UserContextKey).(*auth.ContextUser)
-		if !ok || user.Role != "admin" {
+		if !ok || user.Role != RoleAdmin {
 			server.WriteError(w, http.StatusForbidden, "forbidden")
 			return
 		}

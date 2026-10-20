@@ -214,6 +214,52 @@ func (s *Service) GetMe(ctx context.Context, userID int) (User, error) {
 	return u, nil
 }
 
+// Profile returns the public shape of an account. Other modules read accounts
+// through this rather than the users table, so a column that does not belong in
+// a profile never has to be selected to produce one.
+func (s *Service) Profile(ctx context.Context, userID int) (Profile, error) {
+	p, err := s.repo.Profile(ctx, userID)
+	if err != nil {
+		return Profile{}, err
+	}
+	if p.ID == 0 {
+		return Profile{}, ErrUserNotFound
+	}
+	return p, nil
+}
+
+// UpdateProfile changes the mutable fields of an account and returns it.
+func (s *Service) UpdateProfile(ctx context.Context, userID int, name, phone string) (Profile, error) {
+	u, err := s.repo.Update(ctx, userID, name, phone)
+	if err != nil {
+		return Profile{}, err
+	}
+	if u.ID == 0 {
+		return Profile{}, ErrUserNotFound
+	}
+	return Profile{
+		ID:           u.ID,
+		Email:        u.Email,
+		Name:         u.Name,
+		Phone:        u.Phone,
+		AvatarURL:    u.AvatarURL,
+		AuthProvider: u.AuthProvider,
+		Role:         u.Role,
+		CreatedAt:    u.CreatedAt,
+		UpdatedAt:    u.UpdatedAt,
+	}, nil
+}
+
+// NewCustomersThisMonth counts the accounts created since the first instant of
+// the current month. The month boundary is computed here rather than by the
+// database, so the figure is a function of a clock the test controls and not of
+// a dialect's date modifiers.
+func (s *Service) NewCustomersThisMonth(ctx context.Context) (int, error) {
+	now := time.Now().UTC()
+	since := time.Date(now.Year(), now.Month(), 1, 0, 0, 0, 0, time.UTC)
+	return s.repo.CountCreatedSince(ctx, since)
+}
+
 func (s *Service) issueTokens(ctx context.Context, user User) (AuthResult, error) {
 	access, err := GenerateAccessToken(user.ID, user.Role)
 	if err != nil {
