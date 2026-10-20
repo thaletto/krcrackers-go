@@ -24,7 +24,7 @@ func productServiceBench(b *testing.B) *products.Service {
 	if _, err := migrations.Up(context.Background(), db); err != nil {
 		b.Fatalf("migrations.Up: %v", err)
 	}
-	svc := products.NewService(db, nil)
+	svc := products.NewService(products.NewRepository(db), nil)
 	seedProducts(b, svc, 100)
 	return svc
 }

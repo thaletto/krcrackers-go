@@ -1,6 +1,7 @@
 package products
 
 import (
+	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -11,11 +12,23 @@ import (
 	"github.com/thaletto/krcrackers-go/src/services/products"
 )
 
-type Handler struct {
-	svc *products.Service
+// Catalogue is what this handler needs from the product module. Declaring it
+// here, at the seam that consumes it, keeps the HTTP layer testable without a
+// database and keeps the module's own surface free of handler concerns.
+type Catalogue interface {
+	Create(ctx context.Context, input products.ProductInput) (products.Product, error)
+	List(ctx context.Context, limit, offset int) (products.ListProductsResponse, error)
+	Search(ctx context.Context, filter products.Filter) (products.ListProductsResponse, error)
+	Get(ctx context.Context, id int) (products.Product, error)
+	Update(ctx context.Context, id int, input products.ProductInput) (products.Product, error)
+	Delete(ctx context.Context, id int) error
 }
 
-func NewHandler(svc *products.Service) *Handler {
+type Handler struct {
+	svc Catalogue
+}
+
+func NewHandler(svc Catalogue) *Handler {
 	return &Handler{svc: svc}
 }
 
@@ -35,9 +48,10 @@ func (h *Handler) RegisterRoutes(mux *http.ServeMux) {
 //
 // @Summary      Create a product
 // @Description  Create a product as an administrator
-// @Tags         products
+// @Tags         admin
 // @Accept       json
 // @Produce      json
+// @Security     cookieAuth
 // @Param        input  body      products.ProductInput  true  "Product details"
 // @Success      201    {object}  products.Product
 // @Failure      400    {object}  server.ErrorResponse
@@ -54,7 +68,7 @@ func (h *Handler) create(w http.ResponseWriter, r *http.Request) {
 
 	product, err := h.svc.Create(r.Context(), input)
 	if err != nil {
-		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		h.writeProductError(w, err)
 		return
 	}
 
@@ -86,8 +100,7 @@ func (h *Handler) list(w http.ResponseWriter, r *http.Request) {
 	minPrice, _ := strconv.ParseFloat(q.Get("min_price"), 64)
 	maxPrice, _ := strconv.ParseFloat(q.Get("max_price"), 64)
 	sort := q.Get("sort")
-	limit, _ := strconv.Atoi(q.Get("limit"))
-	offset, _ := strconv.Atoi(q.Get("offset"))
+	limit, offset := server.ParsePage(r)
 
 	hasFilters := query != "" || category != "" || brand != "" || minPrice > 0 || maxPrice > 0 || sort != ""
 
@@ -147,9 +160,10 @@ func (h *Handler) get(w http.ResponseWriter, r *http.Request) {
 //
 // @Summary      Update a product
 // @Description  Replace a product as an administrator
-// @Tags         products
+// @Tags         admin
 // @Accept       json
 // @Produce      json
+// @Security     cookieAuth
 // @Param        id     path      int                    true  "Product ID"
 // @Param        input  body      products.ProductInput  true  "Product details"
 // @Success      200    {object}  products.Product
@@ -174,11 +188,7 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 
 	product, err := h.svc.Update(r.Context(), id, input)
 	if err != nil {
-		if errors.Is(err, apperrors.ErrNotFound) {
-			server.WriteError(w, http.StatusNotFound, err.Error())
-			return
-		}
-		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		h.writeProductError(w, err)
 		return
 	}
 
@@ -189,7 +199,8 @@ func (h *Handler) update(w http.ResponseWriter, r *http.Request) {
 //
 // @Summary      Delete a product
 // @Description  Delete a product as an administrator
-// @Tags         products
+// @Tags         admin
+// @Security     cookieAuth
 // @Param        id   path  int  true  "Product ID"
 // @Success      204
 // @Failure      400  {object}  server.ErrorResponse
@@ -215,4 +226,27 @@ func (h *Handler) delete(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+// writeProductError maps a product failure to a status. The validation messages
+// and the sort sentinel are written for a client to read; anything else is a
+// storage or driver failure whose text is not, so it is logged rather than
+// returned.
+func (h *Handler) writeProductError(w http.ResponseWriter, err error) {
+	switch {
+	case errors.Is(err, apperrors.ErrNotFound):
+		server.WriteError(w, http.StatusNotFound, err.Error())
+	case errors.Is(err, products.ErrInvalidSort), isProductValidation(err):
+		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+	default:
+		server.WriteInternalError(w, err)
+	}
+}
+
+func isProductValidation(err error) bool {
+	switch err.Error() {
+	case "name is required", "price must be >= 0", "category is required", "rating must be between 0 and 5":
+		return true
+	}
+	return false
 }

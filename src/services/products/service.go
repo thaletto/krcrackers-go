@@ -1,15 +1,25 @@
+// Package products provides the product catalogue: creation, listing,
+// full-text search, filtering and admin maintenance. Changes are published to
+// the event bus.
+//
+// The repository owns the SQL; this file holds the product rules, the response
+// types and the event publishing.
 package products
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
-	"github.com/thaletto/krcrackers-go/src/database"
-	apperrors "github.com/thaletto/krcrackers-go/src/errors"
 	"github.com/thaletto/krcrackers-go/src/eventbus"
 	"github.com/thaletto/krcrackers-go/src/eventbus/events"
 )
+
+// ErrInvalidSort is returned when a filter asks for an ordering this module
+// does not offer. An unrecognised sort is a client mistake, not a request for
+// the default order.
+var ErrInvalidSort = errors.New("unsupported sort")
 
 type ProductFields struct {
 	Price        float64  `json:"price"`
@@ -39,6 +49,8 @@ type ListProductsResponse struct {
 	Offset *int      `json:"offset,omitempty"`
 }
 
+// Filter narrows and orders a product search. A zero Limit means "omitted":
+// every matching product is returned.
 type Filter struct {
 	Query    string
 	Category string
@@ -50,13 +62,35 @@ type Filter struct {
 	Offset   int
 }
 
-type Service struct {
-	db  database.DB
-	bus eventbus.Bus
+// sortOrders is the closed set of orderings a search may ask for. It is a map
+// rather than a switch with a silent default so that adding one is the only way
+// to accept a new value.
+var sortOrders = map[string]string{
+	"":           "p.id DESC",
+	"price_asc":  "p.price ASC",
+	"price_desc": "p.price DESC",
 }
 
-func NewService(db database.DB, bus eventbus.Bus) *Service {
-	return &Service{db: db, bus: bus}
+func orderByClause(sort string) (string, error) {
+	clause, ok := sortOrders[sort]
+	if !ok {
+		return "", fmt.Errorf("%w: %q", ErrInvalidSort, sort)
+	}
+	return clause, nil
+}
+
+// Service owns the product rules: validation, the search filter, and the
+// events a catalogue change publishes. The HTTP layer (apis/products) decodes
+// requests and maps errors to status codes.
+type Service struct {
+	repo Repository
+	bus  eventbus.Bus
+}
+
+// NewService creates a new products service over a repository and an event bus.
+// bus may be nil when nothing subscribes.
+func NewService(repo Repository, bus eventbus.Bus) *Service {
+	return &Service{repo: repo, bus: bus}
 }
 
 func (s *Service) Create(ctx context.Context, input ProductInput) (Product, error) {
@@ -64,168 +98,35 @@ func (s *Service) Create(ctx context.Context, input ProductInput) (Product, erro
 	if err := validateProductInput(input); err != nil {
 		return Product{}, err
 	}
-	res, err := s.db.Execute(ctx, `
-		INSERT INTO products (name, price, brand, description, category, image, compare_price, rating, delivery)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice, input.Rating, input.Delivery)
+	product, err := s.repo.Create(ctx, input)
 	if err != nil {
-		return Product{}, fmt.Errorf("insert product: %w", err)
+		return Product{}, err
 	}
-	product := productFromInput(int(res.LastInsertID), input)
 	s.publishProductEvent(ctx, events.ProductCreated, product)
 	return product, nil
 }
 
 func (s *Service) List(ctx context.Context, limit, offset int) (ListProductsResponse, error) {
-	query := `
-		SELECT id, name, price, brand, description, category, image, compare_price, rating, delivery,
-			COUNT(*) OVER() AS total
-		FROM products
-		ORDER BY id
-	`
-	var queryArgs []any
-	if limit > 0 {
-		query += " LIMIT ? OFFSET ?"
-		queryArgs = append(queryArgs, limit, offset)
-	}
-
-	rows, err := s.db.Query(ctx, query, queryArgs...)
-	if err != nil {
-		return ListProductsResponse{}, fmt.Errorf("list products: %w", err)
-	}
-
-	var limitPtr, offsetPtr *int
-	if limit > 0 {
-		limitPtr = &limit
-		offsetPtr = &offset
-	}
-
-	total := 0
-	if len(rows) > 0 {
-		if v, err := rows[0].Int("total"); err == nil {
-			total = int(v)
-		}
-	}
-
-	items := make([]Product, 0, len(rows))
-	for _, row := range rows {
-		p, err := rowToProduct(row)
-		if err != nil {
-			return ListProductsResponse{}, fmt.Errorf("scan product: %w", err)
-		}
-		items = append(items, p)
-	}
-	return ListProductsResponse{
-		Items:  items,
-		Total:  total,
-		Limit:  limitPtr,
-		Offset: offsetPtr,
-	}, nil
+	return s.repo.List(ctx, limit, offset)
 }
 
+// Search filters the catalogue. An unrecognised sort is rejected rather than
+// quietly returning a different order than the caller asked for.
 func (s *Service) Search(ctx context.Context, filter Filter) (ListProductsResponse, error) {
-	useFTS := filter.Query != ""
-
-	var fromClauses []string
-	var whereClauses []string
-	var args []any
-
-	if useFTS {
-		fromClauses = append(fromClauses, "products p")
-		fromClauses = append(fromClauses, "JOIN products_fts ON p.id = products_fts.rowid")
-		whereClauses = append(whereClauses, "products_fts MATCH ?")
-		args = append(args, filter.Query)
-	} else {
-		fromClauses = append(fromClauses, "products p")
+	if _, err := orderByClause(filter.Sort); err != nil {
+		return ListProductsResponse{}, err
 	}
-
-	if filter.Category != "" {
-		whereClauses = append(whereClauses, "p.category = ?")
-		args = append(args, filter.Category)
-	}
-	if filter.Brand != "" {
-		whereClauses = append(whereClauses, "p.brand = ?")
-		args = append(args, filter.Brand)
-	}
-	if filter.MinPrice > 0 {
-		whereClauses = append(whereClauses, "p.price >= ?")
-		args = append(args, filter.MinPrice)
-	}
-	if filter.MaxPrice > 0 {
-		whereClauses = append(whereClauses, "p.price <= ?")
-		args = append(args, filter.MaxPrice)
-	}
-
-	fromClause := strings.Join(fromClauses, " ")
-	whereClause := ""
-	if len(whereClauses) > 0 {
-		whereClause = " WHERE " + strings.Join(whereClauses, " AND ")
-	}
-
-	orderBy := "p.id DESC"
-	switch filter.Sort {
-	case "price_asc":
-		orderBy = "p.price ASC"
-	case "price_desc":
-		orderBy = "p.price DESC"
-	}
-
-	query := "SELECT p.id, p.name, p.price, p.brand, p.description, p.category, p.image, p.compare_price, p.rating, p.delivery, COUNT(*) OVER() AS total FROM " + fromClause + whereClause + " ORDER BY " + orderBy
-
-	queryArgs := make([]any, len(args))
-	copy(queryArgs, args)
-
-	if filter.Limit > 0 {
-		query += " LIMIT ? OFFSET ?"
-		queryArgs = append(queryArgs, filter.Limit, filter.Offset)
-	}
-
-	rows, err := s.db.Query(ctx, query, queryArgs...)
-	if err != nil {
-		return ListProductsResponse{}, fmt.Errorf("search products: %w", err)
-	}
-
-	var limitPtr, offsetPtr *int
-	if filter.Limit > 0 {
-		limitPtr = &filter.Limit
-		offsetPtr = &filter.Offset
-	}
-
-	total := 0
-	if len(rows) > 0 {
-		if v, err := rows[0].Int("total"); err == nil {
-			total = int(v)
-		}
-	}
-
-	items := make([]Product, 0, len(rows))
-	for _, row := range rows {
-		p, err := rowToProduct(row)
-		if err != nil {
-			return ListProductsResponse{}, fmt.Errorf("scan product: %w", err)
-		}
-		items = append(items, p)
-	}
-	return ListProductsResponse{
-		Items:  items,
-		Total:  total,
-		Limit:  limitPtr,
-		Offset: offsetPtr,
-	}, nil
+	return s.repo.Search(ctx, filter)
 }
 
 func (s *Service) Get(ctx context.Context, id int) (Product, error) {
-	rows, err := s.db.Query(ctx, `
-		SELECT id, name, price, brand, description, category, image, compare_price, rating, delivery
-		FROM products WHERE id = ?
-	`, id)
-	if err != nil {
-		return Product{}, fmt.Errorf("get product %d: %w", id, err)
-	}
-	if len(rows) == 0 {
-		return Product{}, fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
-	}
-	return rowToProduct(rows[0])
+	return s.repo.Get(ctx, id)
+}
+
+// GetByIDs returns the catalogue entries for the given ids. It is how the Order
+// module prices a basket without reading the products table.
+func (s *Service) GetByIDs(ctx context.Context, ids []int) ([]Product, error) {
+	return s.repo.GetByIDs(ctx, ids)
 }
 
 func (s *Service) Update(ctx context.Context, id int, input ProductInput) (Product, error) {
@@ -233,62 +134,20 @@ func (s *Service) Update(ctx context.Context, id int, input ProductInput) (Produ
 	if err := validateProductInput(input); err != nil {
 		return Product{}, err
 	}
-	res, err := s.db.Execute(ctx, `
-		UPDATE products
-		SET name = ?, price = ?, brand = ?, description = ?, category = ?, image = ?, compare_price = ?, rating = ?, delivery = ?
-		WHERE id = ?
-	`, input.Name, input.Price, input.Brand, input.Description, input.Category, input.Image, input.ComparePrice, input.Rating, input.Delivery, id)
+	product, err := s.repo.Update(ctx, id, input)
 	if err != nil {
-		return Product{}, fmt.Errorf("update product %d: %w", id, err)
+		return Product{}, err
 	}
-	if res.RowsAffected == 0 {
-		return Product{}, fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
-	}
-	product := productFromInput(id, input)
 	s.publishProductEvent(ctx, events.ProductUpdated, product)
 	return product, nil
 }
 
 func (s *Service) Delete(ctx context.Context, id int) error {
-	res, err := s.db.Execute(ctx, `DELETE FROM products WHERE id = ?`, id)
-	if err != nil {
-		return fmt.Errorf("delete product %d: %w", id, err)
-	}
-	if res.RowsAffected == 0 {
-		return fmt.Errorf("product %d: %w", id, apperrors.ErrNotFound)
+	if err := s.repo.Delete(ctx, id); err != nil {
+		return err
 	}
 	s.publishProductDeleteEvent(ctx, id)
 	return nil
-}
-
-func (s *Service) GetByIDs(ctx context.Context, ids []int) ([]Product, error) {
-	if len(ids) == 0 {
-		return nil, nil
-	}
-	placeholders := make([]string, len(ids))
-	args := make([]any, len(ids))
-	for i, id := range ids {
-		placeholders[i] = "?"
-		args[i] = id
-	}
-	query := fmt.Sprintf(`
-		SELECT id, name, price, brand, description, category, image, compare_price, rating, delivery
-		FROM products WHERE id IN (%s)
-	`, strings.Join(placeholders, ","))
-
-	rows, err := s.db.Query(ctx, query, args...)
-	if err != nil {
-		return nil, fmt.Errorf("get products by ids: %w", err)
-	}
-	products := make([]Product, 0, len(rows))
-	for _, row := range rows {
-		p, err := rowToProduct(row)
-		if err != nil {
-			return nil, err
-		}
-		products = append(products, p)
-	}
-	return products, nil
 }
 
 func (s *Service) publishProductEvent(ctx context.Context, eventName string, p Product) {
@@ -360,65 +219,4 @@ func normalizeProductInput(input ProductInput) ProductInput {
 		}
 	}
 	return input
-}
-
-func productFromInput(id int, b ProductInput) Product {
-	return Product{ID: id, ProductFields: b.ProductFields}
-}
-
-func rowToProduct(row database.Row) (Product, error) {
-	id, err := row.Int("id")
-	if err != nil {
-		return Product{}, err
-	}
-	name, err := row.String("name")
-	if err != nil {
-		return Product{}, err
-	}
-	price, err := row.Float("price")
-	if err != nil {
-		return Product{}, err
-	}
-	brand, err := row.NullableString("brand")
-	if err != nil {
-		return Product{}, err
-	}
-	description, err := row.NullableString("description")
-	if err != nil {
-		return Product{}, err
-	}
-	category, err := row.String("category")
-	if err != nil {
-		return Product{}, err
-	}
-	image, err := row.NullableString("image")
-	if err != nil {
-		return Product{}, err
-	}
-	comparePrice, err := row.Float("compare_price")
-	if err != nil {
-		return Product{}, err
-	}
-	rating, err := row.NullableFloat("rating")
-	if err != nil {
-		return Product{}, err
-	}
-	delivery, err := row.NullableString("delivery")
-	if err != nil {
-		return Product{}, err
-	}
-	return Product{
-		ID: int(id),
-		ProductFields: ProductFields{
-			Name:         name,
-			Price:        price,
-			Brand:        brand,
-			Description:  description,
-			Category:     category,
-			Image:        image,
-			ComparePrice: comparePrice,
-			Rating:       rating,
-			Delivery:     delivery,
-		},
-	}, nil
 }

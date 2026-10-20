@@ -71,7 +71,7 @@ func newHandler(db database.DB, cfg *config.Config) http.Handler {
 	notifSub := notifications.NewSubscriber(notifSvc)
 	notifSub.RegisterHandlers(bus)
 
-	productsSvc := productsSvc.NewService(db, bus)
+	productsSvc := productsSvc.NewService(productsSvc.NewRepository(db), bus)
 	productsHandler := products.NewHandler(productsSvc)
 
 	userAdapter := &adapters.UserProviderAdapter{Repo: authRepo}

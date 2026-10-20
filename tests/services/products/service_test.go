@@ -2,6 +2,7 @@ package products_test
 
 import (
 	"context"
+	"errors"
 	"path/filepath"
 	"testing"
 
@@ -28,7 +29,7 @@ func productService(t *testing.T) *products.Service {
 		t.Fatalf("migrations.Up: %v", err)
 	}
 
-	return products.NewService(db, nil)
+	return products.NewService(products.NewRepository(db), nil)
 }
 
 func TestProductMetadataRoundTrip(t *testing.T) {
@@ -161,6 +162,74 @@ func TestProductRatingValidation(t *testing.T) {
 		})
 		if err == nil {
 			t.Errorf("rating %v: expected validation error", rating)
+		}
+	}
+}
+
+// The bug this guards: an unrecognised sort fell through a switch to the
+// default `id DESC` ordering, so a caller asking for `price_ascd` silently got
+// a different order instead of being told the value is wrong.
+//
+// It fails on the pre-fix code: the search returned products rather than
+// ErrInvalidSort.
+func TestUnsupportedSortIsRejected(t *testing.T) {
+	ctx := context.Background()
+	svc := productService(t)
+
+	if _, err := svc.Create(ctx, products.ProductInput{
+		ProductFields: products.ProductFields{Name: "Sparklers", Price: 100, Category: "Fireworks"},
+	}); err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	_, err := svc.Search(ctx, products.Filter{Sort: "price_ascd"})
+	if !errors.Is(err, products.ErrInvalidSort) {
+		t.Fatalf("Search with a typo'd sort returned %v, want ErrInvalidSort", err)
+	}
+}
+
+// The supported orderings are the whole contract, so they are pinned rather
+// than discovered: each must actually order the results it claims to.
+func TestSupportedSortsOrderTheResults(t *testing.T) {
+	ctx := context.Background()
+	svc := productService(t)
+
+	for _, p := range []struct {
+		name  string
+		price float64
+	}{{"Cheap", 100}, {"Mid", 200}, {"Dear", 300}} {
+		if _, err := svc.Create(ctx, products.ProductInput{
+			ProductFields: products.ProductFields{Name: p.name, Price: p.price, Category: "Fireworks"},
+		}); err != nil {
+			t.Fatalf("Create %s: %v", p.name, err)
+		}
+	}
+
+	for _, c := range []struct {
+		sort string
+		want []string
+	}{
+		{"price_asc", []string{"Cheap", "Mid", "Dear"}},
+		{"price_desc", []string{"Dear", "Mid", "Cheap"}},
+		// The default is newest first, which for ascending ids is Dear, Mid, Cheap.
+		{"", []string{"Dear", "Mid", "Cheap"}},
+	} {
+		got, err := svc.Search(ctx, products.Filter{Category: "Fireworks", Sort: c.sort})
+		if err != nil {
+			t.Fatalf("Search(sort=%q): %v", c.sort, err)
+		}
+		names := make([]string, 0, len(got.Items))
+		for _, p := range got.Items {
+			names = append(names, p.Name)
+		}
+		if len(names) != len(c.want) {
+			t.Fatalf("Search(sort=%q) returned %v, want %v", c.sort, names, c.want)
+		}
+		for i := range names {
+			if names[i] != c.want[i] {
+				t.Errorf("Search(sort=%q) = %v, want %v", c.sort, names, c.want)
+				break
+			}
 		}
 	}
 }
