@@ -97,5 +97,5 @@ func newHandler(db database.DB, cfg *config.Config) http.Handler {
 		})
 	})
 
-	return server.WithLogging(mux)
+	return server.WithLogging(server.WithSecurityHeaders(mux))
 }
