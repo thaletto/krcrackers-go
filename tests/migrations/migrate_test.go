@@ -337,9 +337,10 @@ func TestGuestOrdersMigrationBackfillsOwnershipByEmail(t *testing.T) {
 	if _, err := migrations.Up(ctx, db); err != nil {
 		t.Fatalf("Up: %v", err)
 	}
-	if err := migrations.Down(ctx, db); err != nil {
-		t.Fatalf("Down: %v", err)
-	}
+	// Roll back to before 0005 specifically, not "one migration": a single Down
+	// rolls back whatever is newest, so a later migration would silently change
+	// what this test exercises.
+	rollbackToPending(t, db, 5)
 
 	if _, err := db.Execute(ctx, `
 		INSERT INTO users (email, name, auth_provider, password_hash, role)
@@ -399,4 +400,32 @@ func orderOwner(t *testing.T, db database.DB, email string) *int {
 	}
 	owner := int(id)
 	return &owner
+}
+
+// rollbackToPending rolls back until the given version is no longer recorded as
+// applied. It names the version a test means rather than a step count, so
+// adding a migration later cannot quietly change what the test covers.
+func rollbackToPending(t *testing.T, db database.DB, version int64) {
+	t.Helper()
+	ctx := context.Background()
+
+	for range 20 {
+		statuses, err := migrations.GetStatus(ctx, db)
+		if err != nil {
+			t.Fatalf("GetStatus: %v", err)
+		}
+		stillApplied := false
+		for _, s := range statuses {
+			if s.Version == version && s.Applied {
+				stillApplied = true
+			}
+		}
+		if !stillApplied {
+			return
+		}
+		if err := migrations.Down(ctx, db); err != nil {
+			t.Fatalf("Down: %v", err)
+		}
+	}
+	t.Fatalf("version %d is still applied after 20 rollbacks", version)
 }

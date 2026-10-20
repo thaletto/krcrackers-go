@@ -5,9 +5,8 @@
 //
 //	NNNN_name.sql
 //
-// where NNNN is a monotonically increasing version number, parsed via
-// goose.NumericComponent. Each file uses goose-style annotations to
-// delimit the up and down sections:
+// where NNNN is a monotonically increasing version number. Each file uses
+// goose-style annotations to delimit the up and down sections:
 //
 //	-- +goose Up
 //	CREATE TABLE foo (...);
@@ -15,13 +14,22 @@
 //	-- +goose Down
 //	DROP TABLE foo;
 //
-// The runner tracks applied versions in a small bookkeeping table called
-// `schema_migrations` and executes statements one at a time through the
-// shared database.DB interface, so it works for backends that do not
-// expose a *sql.DB (e.g. Cloudflare D1's HTTP API). Only the version
-// parser is delegated to pressly/goose; section and statement splitting
-// stay local because goose's statement parser is internal and the D1
-// runner is the value-add.
+// The runner records applied versions in a small bookkeeping table called
+// `schema_migrations` and executes statements through the shared
+// database.DB interface, so it works for backends that do not expose a
+// *sql.DB (e.g. Cloudflare D1's HTTP API). Section and statement splitting are
+// local: the runner is the value-add, and the one thing it needs from elsewhere
+// is a version number, which it reads off the filename itself.
+//
+// Three properties are worth knowing:
+//
+//   - "Applied" means one thing. Up, Down and GetStatus all read the recorded
+//     versions as a set, so they cannot report different states for the same
+//     database. A gap in the bookkeeping is filled, not skipped.
+//   - Applying a migration is transactional where the adapter can be. On D1,
+//     which has no interactive transactions, statements run one at a time and a
+//     failure leaves the version unrecorded, so the next run retries it.
+//   - GetStatus only reads. It does not create the bookkeeping table.
 package migrations
 
 import (
@@ -31,9 +39,8 @@ import (
 	"io/fs"
 	"log"
 	"sort"
+	"strconv"
 	"strings"
-
-	"github.com/pressly/goose/v3"
 
 	"github.com/thaletto/krcrackers-go/src/database"
 )
@@ -100,15 +107,18 @@ func parseFile(name, content string) (migration, error) {
 	return migration{Version: v, Name: n, Up: up, Down: down}, nil
 }
 
+// parseVersion reads the leading digits of an NNNN_name.sql filename. The
+// convention lives here and nowhere else: the name is the version, and the
+// runner does not need a library to learn that.
 func parseVersion(name string) (int64, string, error) {
-	v, err := goose.NumericComponent(name)
-	if err != nil {
-		return 0, "", fmt.Errorf("invalid version in %q: %w", name, err)
-	}
 	base := strings.TrimSuffix(name, ".sql")
-	_, rest, ok := strings.Cut(base, "_")
+	digits, rest, ok := strings.Cut(base, "_")
 	if !ok {
 		return 0, "", fmt.Errorf("invalid migration filename %q: expected NNNN_name.sql", name)
+	}
+	v, err := strconv.ParseInt(digits, 10, 64)
+	if err != nil {
+		return 0, "", fmt.Errorf("invalid version in %q: %w", name, err)
 	}
 	return v, rest, nil
 }
@@ -188,70 +198,123 @@ func parseSections(content string) (up, down []string) {
 	return
 }
 
-// splitStatements splits a SQL string on `;` boundaries. Line comments are
-// stripped first (see stripLineComments) so that a statement preceded by a
-// comment is still executed. Note: this does not handle `;` inside string
-// literals; none of the current migrations rely on that, and DDL rarely does.
+// splitStatements splits a SQL string into statements on top-level `;`
+// boundaries.
+//
+// It walks the text once, so comments and quoted text are handled by the same
+// pass that finds the boundaries. That matters: a `;` inside a string literal
+// or a comment is not a boundary, and a two-stage strip-then-split pipeline
+// disagrees about that — it recognises quotes while stripping comments and then
+// ignores them while splitting, so `DEFAULT ';'` splits mid-literal and the
+// migration still records as applied.
+//
+// A `?`, a `[...]` identifier and a doubled quote inside a quoted run are all
+// handled, because DDL in this project uses all three.
 func splitStatements(sql string) []string {
-	var out []string
-	for raw := range strings.SplitSeq(stripLineComments(sql), ";") {
-		s := strings.TrimSpace(raw)
-		if s == "" {
+	var (
+		out      []string
+		buf      strings.Builder
+		quote    byte
+		lineCmt  bool
+		blockCmt bool
+	)
+	flush := func() {
+		if s := strings.TrimSpace(buf.String()); s != "" {
+			out = append(out, s)
+		}
+		buf.Reset()
+	}
+
+	for i := 0; i < len(sql); i++ {
+		c := sql[i]
+
+		if lineCmt {
+			if c == '\n' {
+				lineCmt = false
+				// Keep the newline so tokens either side stay separated.
+				buf.WriteByte(c)
+			}
 			continue
 		}
-		out = append(out, s)
+		if blockCmt {
+			if c == '*' && i+1 < len(sql) && sql[i+1] == '/' {
+				blockCmt = false
+				i++
+			}
+			continue
+		}
+		if quote != 0 {
+			buf.WriteByte(c)
+			if c == quote {
+				// A doubled quote inside a quoted run is an escape, not the end.
+				if i+1 < len(sql) && sql[i+1] == quote {
+					buf.WriteByte(quote)
+					i++
+				} else {
+					quote = 0
+				}
+			}
+			continue
+		}
+
+		switch {
+		case c == '-' && i+1 < len(sql) && sql[i+1] == '-':
+			lineCmt = true
+			i++
+		case c == '/' && i+1 < len(sql) && sql[i+1] == '*':
+			blockCmt = true
+			i++
+		case c == '\'' || c == '"' || c == '`':
+			quote = c
+			buf.WriteByte(c)
+		case c == '[':
+			quote = ']'
+			buf.WriteByte(c)
+		case c == ';':
+			flush()
+		default:
+			buf.WriteByte(c)
+		}
 	}
+	flush()
 	return out
 }
 
-// stripLineComments removes `--` line comments, leaving line structure intact.
-//
-// Comments must be removed rather than used to skip a chunk. A chunk that opens
-// with a comment also contains the statement that follows it, because `;` is what
-// separates them, so skipping the whole chunk silently discards that statement.
-// The failure is invisible: the migration reports as applied while the column or
-// table it created is missing.
-func stripLineComments(sql string) string {
-	var b strings.Builder
-	b.Grow(len(sql))
-
-	var quote byte
-	for i := 0; i < len(sql); i++ {
-		c := sql[i]
-		if quote != 0 {
-			b.WriteByte(c)
-			// A doubled quote is an escaped quote, not a terminator.
-			if c == quote {
-				if i+1 < len(sql) && sql[i+1] == quote {
-					b.WriteByte(quote)
-					i++
-					continue
-				}
-				quote = 0
-			}
-			continue
-		}
-		switch c {
-		case '\'', '"', '`':
-			quote = c
-			b.WriteByte(c)
-		case '-':
-			if i+1 < len(sql) && sql[i+1] != '-' {
-				b.WriteByte(c)
-				continue
-			}
-			for i < len(sql) && sql[i] != '\n' {
-				i++
-			}
-			// Keep the newline so tokens on either side stay separated.
-			if i < len(sql) {
-				b.WriteByte('\n')
-			}
-		default:
-			b.WriteByte(c)
-		}
+// versionTableExists reports whether the bookkeeping table is present, without
+// creating it. A status query must not write to the schema.
+func versionTableExists(ctx context.Context, db database.DB) (bool, error) {
+	rows, err := db.Query(ctx,
+		"SELECT name FROM sqlite_master WHERE type = 'table' AND name = ?", versionTable)
+	if err != nil {
+		return false, err
 	}
-	return b.String()
+	return len(rows) > 0, nil
+}
+
+// appliedVersions reads the bookkeeping table as the set of versions recorded
+// as applied. This is the one definition of "applied": Up, Down and GetStatus
+// all read it, so they cannot disagree about a database's state.
+//
+// A missing table means nothing has been applied yet, which is a normal state
+// for a fresh database rather than an error.
+func appliedVersions(ctx context.Context, db database.DB) (map[int64]bool, error) {
+	exists, err := versionTableExists(ctx, db)
+	if err != nil {
+		return nil, err
+	}
+	if !exists {
+		return map[int64]bool{}, nil
+	}
+	rows, err := db.Query(ctx, "SELECT version FROM "+versionTable)
+	if err != nil {
+		return nil, err
+	}
+	applied := make(map[int64]bool, len(rows))
+	for _, r := range rows {
+		v, _ := r.Int("version")
+		applied[v] = true
+	}
+	return applied, nil
 }
 
 func ensureVersionTable(ctx context.Context, db database.DB) error {
@@ -261,33 +324,83 @@ func ensureVersionTable(ctx context.Context, db database.DB) error {
 	return err
 }
 
-func currentVersion(ctx context.Context, db database.DB) (int64, error) {
-	rows, err := db.Query(ctx,
-		"SELECT COALESCE(MAX(version), 0) AS v FROM "+versionTable)
+func recordApplied(ctx context.Context, r runner, version int64) error {
+	_, err := r.exec(ctx, "INSERT INTO "+versionTable+" (version) VALUES (?)", version)
+	return err
+}
+
+func recordRolledBack(ctx context.Context, r runner, version int64) error {
+	_, err := r.exec(ctx, "DELETE FROM "+versionTable+" WHERE version = ?", version)
+	return err
+}
+
+// runner carries the two things a migration run needs, so apply and rollback
+// share one implementation whether or not a transaction is in play.
+type runner struct {
+	db database.DB
+	tx database.Tx
+}
+
+func (r runner) exec(ctx context.Context, sql string, params ...any) (database.Result, error) {
+	if r.tx != nil {
+		return r.tx.Execute(ctx, sql, params...)
+	}
+	return r.db.Execute(ctx, sql, params...)
+}
+
+// begin returns a transactional runner when the adapter can offer one, and a
+// non-transactional runner when it cannot. D1's HTTP API has no interactive
+// transactions, so a migration there applies statement by statement: a failure
+// half-way leaves the schema partly applied and the version unrecorded, so the
+// next run tries that migration again.
+func begin(ctx context.Context, db database.DB) (runner, error) {
+	if !db.Capabilities().AtomicTransactions {
+		return runner{db: db}, nil
+	}
+	tx, err := db.Begin(ctx)
 	if err != nil {
-		return 0, err
+		return runner{}, fmt.Errorf("begin tx: %w", err)
 	}
-	if len(rows) == 0 {
-		return 0, nil
+	return runner{db: db, tx: tx}, nil
+}
+
+func (r runner) commit() error {
+	if r.tx == nil {
+		return nil
 	}
-	v, _ := rows[0].Int("v")
-	return v, nil
+	return r.tx.Commit()
 }
 
-func recordApplied(ctx context.Context, db database.DB, version int64) error {
-	_, err := db.Execute(ctx,
-		"INSERT INTO "+versionTable+" (version) VALUES (?)", version)
-	return err
+func (r runner) abort() {
+	if r.tx != nil {
+		_ = r.tx.Rollback()
+	}
 }
 
-func recordRolledBack(ctx context.Context, db database.DB, version int64) error {
-	_, err := db.Execute(ctx,
-		"DELETE FROM "+versionTable+" WHERE version = ?", version)
-	return err
+// inTransaction runs body inside a transaction when the adapter supports one,
+// committing on success and rolling back on failure.
+func inTransaction(ctx context.Context, db database.DB, version int64, body func(runner) error) error {
+	r, err := begin(ctx, db)
+	if err != nil {
+		return err
+	}
+	if err := body(r); err != nil {
+		r.abort()
+		return err
+	}
+	if err := r.commit(); err != nil {
+		r.abort()
+		return fmt.Errorf("committing %04d: %w", version, err)
+	}
+	return nil
 }
 
-// Up applies every migration whose version is greater than the current
-// recorded version, in ascending order.
+// Up applies every migration that is not already recorded as applied, in
+// ascending order, and returns the number applied.
+//
+// It reads the recorded versions as a set rather than as a high-water mark, so
+// a gap in the bookkeeping (a version recorded, a later one not) is filled
+// rather than skipped. That is the same view GetStatus reports.
 func Up(ctx context.Context, db database.DB) (int, error) {
 	migs, err := load()
 	if err != nil {
@@ -296,30 +409,41 @@ func Up(ctx context.Context, db database.DB) (int, error) {
 	if err := ensureVersionTable(ctx, db); err != nil {
 		return 0, err
 	}
-	current, err := currentVersion(ctx, db)
+	applied, err := appliedVersions(ctx, db)
 	if err != nil {
 		return 0, err
 	}
-	applied := 0
+
+	count := 0
 	for _, m := range migs {
-		if m.Version <= current {
+		if applied[m.Version] {
 			continue
 		}
-		log.Printf("migrate: applying %04d_%s (up)", m.Version, m.Name)
-		for _, stmt := range m.Up {
-			if _, err := db.Execute(ctx, stmt); err != nil {
-				return applied, fmt.Errorf("migration %04d_%s: %w", m.Version, m.Name, err)
-			}
+		if err := apply(ctx, db, m); err != nil {
+			return count, err
 		}
-		if err := recordApplied(ctx, db, m.Version); err != nil {
-			return applied, fmt.Errorf("recording %04d_%s: %w", m.Version, m.Name, err)
-		}
-		applied++
+		count++
 	}
-	return applied, nil
+	return count, nil
 }
 
-// Down rolls back the most recently applied migration.
+// apply runs one migration's Up statements and records it as applied.
+func apply(ctx context.Context, db database.DB, m migration) error {
+	log.Printf("migrate: applying %04d_%s (up)", m.Version, m.Name)
+	return inTransaction(ctx, db, m.Version, func(r runner) error {
+		for _, stmt := range m.Up {
+			if _, err := r.exec(ctx, stmt); err != nil {
+				return fmt.Errorf("migration %04d_%s: %w", m.Version, m.Name, err)
+			}
+		}
+		if err := recordApplied(ctx, r, m.Version); err != nil {
+			return fmt.Errorf("recording %04d_%s: %w", m.Version, m.Name, err)
+		}
+		return nil
+	})
+}
+
+// Down rolls back the highest recorded version that still has a migration file.
 func Down(ctx context.Context, db database.DB) error {
 	migs, err := load()
 	if err != nil {
@@ -328,50 +452,76 @@ func Down(ctx context.Context, db database.DB) error {
 	if err := ensureVersionTable(ctx, db); err != nil {
 		return err
 	}
-	current, err := currentVersion(ctx, db)
+	applied, err := appliedVersions(ctx, db)
 	if err != nil {
 		return err
 	}
+
 	var target *migration
 	for i := len(migs) - 1; i >= 0; i-- {
-		if migs[i].Version == current {
+		if applied[migs[i].Version] {
 			target = &migs[i]
 			break
 		}
 	}
 	if target == nil {
-		log.Printf("migrate: nothing to roll back (current version: %d)", current)
-		return nil
+		// A version recorded with no matching file means the database is at a
+		// state this build cannot describe. Reporting "nothing to roll back"
+		// would leave that state looking deliberate, so name it.
+		return unknownVersionsError(applied, migs)
 	}
+
 	log.Printf("migrate: rolling back %04d_%s (down)", target.Version, target.Name)
-	for _, stmt := range target.Down {
-		if _, err := db.Execute(ctx, stmt); err != nil {
-			return fmt.Errorf("rollback %04d_%s: %w", target.Version, target.Name, err)
+	return inTransaction(ctx, db, target.Version, func(r runner) error {
+		for _, stmt := range target.Down {
+			if _, err := r.exec(ctx, stmt); err != nil {
+				return fmt.Errorf("rollback %04d_%s: %w", target.Version, target.Name, err)
+			}
 		}
-	}
-	if err := recordRolledBack(ctx, db, target.Version); err != nil {
-		return fmt.Errorf("recording rollback %04d_%s: %w", target.Version, target.Name, err)
-	}
-	return nil
+		if err := recordRolledBack(ctx, r, target.Version); err != nil {
+			return fmt.Errorf("recording rollback %04d_%s: %w", target.Version, target.Name, err)
+		}
+		return nil
+	})
 }
 
-// GetStatus returns the applied/pending state of every known migration.
+// unknownVersionsError reports recorded versions that have no migration file,
+// or nil when there are none.
+func unknownVersionsError(applied map[int64]bool, migs []migration) error {
+	known := make(map[int64]bool, len(migs))
+	for _, m := range migs {
+		known[m.Version] = true
+	}
+	var unknown []int64
+	for v := range applied {
+		if !known[v] {
+			unknown = append(unknown, v)
+		}
+	}
+	if len(unknown) == 0 {
+		return nil
+	}
+	sort.Slice(unknown, func(i, j int) bool { return unknown[i] < unknown[j] })
+	names := make([]string, 0, len(unknown))
+	for _, v := range unknown {
+		names = append(names, fmt.Sprintf("%04d", v))
+	}
+	return fmt.Errorf(
+		"migrate: %s recorded as applied but this build has no such migration file",
+		strings.Join(names, ", "))
+}
+
+// GetStatus returns the applied/pending state of every known migration. It only
+// reads: asking about the schema must not change it, so it does not create the
+// bookkeeping table and a database with no migrations reports all pending.
 func GetStatus(ctx context.Context, db database.DB) ([]Status, error) {
 	migs, err := load()
 	if err != nil {
 		return nil, err
 	}
-	if err := ensureVersionTable(ctx, db); err != nil {
-		return nil, err
-	}
-	rows, err := db.Query(ctx, "SELECT version FROM "+versionTable)
+	applied, err := appliedVersions(ctx, db)
 	if err != nil {
 		return nil, err
-	}
-	applied := make(map[int64]bool)
-	for _, r := range rows {
-		v, _ := r.Int("version")
-		applied[v] = true
 	}
 	out := make([]Status, 0, len(migs))
 	for _, m := range migs {
