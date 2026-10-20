@@ -61,6 +61,16 @@ func (s *sqliteDB) Begin(ctx context.Context) (Tx, error) {
 	return &sqliteTx{tx: tx}, nil
 }
 
+// Capabilities reports the SQLite adapter's guarantees: real transactions,
+// real NULL parameters, and bindable binary.
+func (s *sqliteDB) Capabilities() Capabilities {
+	return Capabilities{
+		AtomicTransactions: true,
+		NullParameters:     true,
+		BinaryParameters:   true,
+	}
+}
+
 func (s *sqliteDB) Close() error {
 	return s.db.Close()
 }

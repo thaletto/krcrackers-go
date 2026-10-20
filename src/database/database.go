@@ -11,9 +11,20 @@ type Result struct {
 }
 
 // Row is the typed view of a single result row at the database seam.
-// Adapters know the source type of each column and surface a TypeError
-// when a caller's accessor does not match it, rather than silently
-// returning a zero value.
+//
+// An accessor that cannot represent the column's value returns a TypeError
+// rather than a zero value, so a caller that asks the wrong question finds
+// out. How faithfully that can be enforced depends on what the transport
+// reports about a column:
+//
+//   - The SQLite adapter reads each column's declared type from the driver, so
+//     a mismatch is caught exactly.
+//   - The D1 adapter receives values as JSON, which does not carry the
+//     declared type, so it can only reject a value whose JSON type cannot
+//     stand for the requested one (text for a number, a number for text).
+//     A REAL column read with Int truncates on D1 where SQLite would raise a
+//     TypeError. Do not rely on that difference: read a column the way its
+//     declared type says, and both adapters agree.
 type Row interface {
 	Int(name string) (int64, error)
 	Float(name string) (float64, error)
@@ -34,17 +45,40 @@ func (e *TypeError) Error() string {
 	return fmt.Sprintf("database: column %q has source type %s, want %s", e.Column, e.Source, e.Want)
 }
 
+// Capabilities describes what an adapter actually guarantees, so a caller that
+// depends on a guarantee can ask instead of assuming.
+type Capabilities struct {
+	// AtomicTransactions is true when a Tx either commits every statement or
+	// none of them. When false, a failure part-way through leaves the earlier
+	// statements applied, and Rollback only compensates what it can.
+	AtomicTransactions bool
+
+	// NullParameters is true when a nil parameter binds as SQL NULL. When
+	// false, the adapter substitutes the NULL literal into the statement
+	// instead, which requires bare `?` placeholders.
+	NullParameters bool
+
+	// BinaryParameters is true when a []byte parameter can be bound. When
+	// false, binding one is an error rather than a silent corruption.
+	BinaryParameters bool
+}
+
 type DB interface {
 	Query(ctx context.Context, sql string, params ...any) ([]Row, error)
 	Execute(ctx context.Context, sql string, params ...any) (Result, error)
 	Begin(ctx context.Context) (Tx, error)
+	// Capabilities reports what this adapter guarantees. It is a property of
+	// the adapter, not of the call, and does not change over its lifetime.
+	Capabilities() Capabilities
 	Close() error
 }
 
 // Tx is a database transaction. Call Commit to persist, Rollback to discard.
-// SQLite adapters wrap *sql.Tx for real atomicity. D1 adapters run each
-// statement immediately and compensate on Rollback (best-effort; not truly
-// atomic).
+//
+// Whether that is all-or-nothing is a property of the adapter, not of the
+// interface: see Capabilities(). A caller whose correctness depends on
+// all-or-nothing must either check, or order its statements so that a partial
+// failure cannot leave it inconsistent.
 type Tx interface {
 	Query(ctx context.Context, sql string, params ...any) ([]Row, error)
 	Execute(ctx context.Context, sql string, params ...any) (Result, error)
@@ -63,6 +97,10 @@ type D1Config struct {
 	APIToken   string
 	AccountID  string
 	DatabaseID string
+
+	// BaseURL overrides the Cloudflare API endpoint. It exists so the D1
+	// adapter can be pointed at a test server; production leaves it empty.
+	BaseURL string
 }
 
 type LocalConfig struct {
