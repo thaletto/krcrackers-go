@@ -64,13 +64,23 @@ func (h *Handler) register(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// The length bounds are a client mistake, so they are reported as one. Left
+	// to the module they surfaced as a 500 from bcrypt's opaque length error.
+	if err := svc.ValidatePassword(input.Password); err != nil {
+		server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		return
+	}
+
 	res, err := h.svc.Register(r.Context(), input.Email, input.Password, input.Name, input.Phone)
 	if err != nil {
-		if errors.Is(err, svc.ErrEmailExists) {
+		switch {
+		case errors.Is(err, svc.ErrEmailExists):
 			server.WriteError(w, http.StatusConflict, err.Error())
-			return
+		case errors.Is(err, svc.ErrPasswordTooShort), errors.Is(err, svc.ErrPasswordTooLong):
+			server.WriteError(w, http.StatusUnprocessableEntity, err.Error())
+		default:
+			server.WriteInternalError(w, err)
 		}
-		server.WriteError(w, http.StatusInternalServerError, "failed to register")
 		return
 	}
 
@@ -156,7 +166,10 @@ func (h *Handler) googleLogin(w http.ResponseWriter, r *http.Request) {
 			return
 		}
 		if errors.Is(err, svc.ErrInvalidGoogleToken) {
-			server.WriteError(w, http.StatusUnauthorized, err.Error())
+			// The verifier's own message is not for the client: it has been
+			// observed carrying the JWKS fetch URL, a DNS failure detail and the
+			// rejected key id. The sentinel says everything the caller may know.
+			server.WriteError(w, http.StatusUnauthorized, svc.ErrInvalidGoogleToken.Error())
 			return
 		}
 		server.WriteError(w, http.StatusInternalServerError, "failed to login with google")

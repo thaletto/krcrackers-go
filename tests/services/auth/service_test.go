@@ -72,7 +72,7 @@ func TestGoogleLoginLinksAnExistingPasswordAccount(t *testing.T) {
 		Email:   "customer@example.com",
 		Name:    "Customer",
 	}, nil))
-	registered, err := svc.Register(ctx, "customer@example.com", "password123", "Customer", "1234567890")
+	registered, err := svc.Register(ctx, "customer@example.com", "correct-horse-battery", "Customer", "1234567890")
 	if err != nil {
 		t.Fatalf("Register: %v", err)
 	}
@@ -89,11 +89,11 @@ func TestGoogleLoginLinksAnExistingPasswordAccount(t *testing.T) {
 	}
 
 	// Linking must not cost the customer their password.
-	if _, err := svc.Login(ctx, "customer@example.com", "password123"); err != nil {
+	if _, err := svc.Login(ctx, "customer@example.com", "correct-horse-battery"); err != nil {
 		t.Fatalf("password Login after linking: %v", err)
 	}
 	// A wrong password must still be rejected, so linking is not a backdoor.
-	if _, err := svc.Login(ctx, "customer@example.com", "wrong-password"); !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, err := svc.Login(ctx, "customer@example.com", "wrong-horse-battery"); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Fatalf("wrong-password Login error: got %v, want ErrInvalidCredentials", err)
 	}
 }
@@ -107,7 +107,7 @@ func TestGoogleLoginIsIdempotentAfterLinking(t *testing.T) {
 		Email:   "customer@example.com",
 		Name:    "Customer",
 	}, nil))
-	if _, err := svc.Register(ctx, "customer@example.com", "password123", "Customer", "1234567890"); err != nil {
+	if _, err := svc.Register(ctx, "customer@example.com", "correct-horse-battery", "Customer", "1234567890"); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	first, err := svc.LoginWithGoogle(ctx, "valid-token")
@@ -133,7 +133,7 @@ func TestGoogleLoginRejectsASecondSubjectForALinkedEmail(t *testing.T) {
 	svc := newAuthService(t, func(string) (auth.GoogleIdentity, error) {
 		return auth.GoogleIdentity{Subject: subject, Email: "customer@example.com", Name: "Customer"}, nil
 	})
-	if _, err := svc.Register(ctx, "customer@example.com", "password123", "Customer", "1234567890"); err != nil {
+	if _, err := svc.Register(ctx, "customer@example.com", "correct-horse-battery", "Customer", "1234567890"); err != nil {
 		t.Fatalf("Register: %v", err)
 	}
 	if _, err := svc.LoginWithGoogle(ctx, "valid-token"); err != nil {
@@ -159,7 +159,7 @@ func TestGoogleOnlyAccountHasNoPasswordLogin(t *testing.T) {
 	if _, err := svc.LoginWithGoogle(ctx, "valid-token"); err != nil {
 		t.Fatalf("LoginWithGoogle: %v", err)
 	}
-	if _, err := svc.Login(ctx, "customer@example.com", "password123"); !errors.Is(err, auth.ErrInvalidCredentials) {
+	if _, err := svc.Login(ctx, "customer@example.com", "correct-horse-battery"); !errors.Is(err, auth.ErrInvalidCredentials) {
 		t.Fatalf("Login error: got %v, want ErrInvalidCredentials", err)
 	}
 }

@@ -187,22 +187,31 @@ echo -e "${YELLOW}--- Auth ---${NC}"
 
 # Register
 test_endpoint "POST" "/auth/register" 201 "Register new user" \
-    '{"email":"test@example.com","password":"password123","name":"Test User","phone":"1234567890"}' \
+    '{"email":"test@example.com","password":"correct-horse-battery","name":"Test User","phone":"1234567890"}' \
     "$COOKIE_JAR"
 
 # Register duplicate
 test_endpoint "POST" "/auth/register" 409 "Register duplicate email" \
-    '{"email":"test@example.com","password":"password123","name":"Test User","phone":"1234567890"}' \
+    '{"email":"test@example.com","password":"correct-horse-battery","name":"Test User","phone":"1234567890"}' \
     "$COOKIE_JAR"
 
 # Login
 test_endpoint "POST" "/auth/login" 200 "Login" \
-    '{"email":"test@example.com","password":"password123"}' \
+    '{"email":"test@example.com","password":"correct-horse-battery"}' \
     "$COOKIE_JAR"
+
+# A password under the minimum length is a client error, not a server fault.
+test_endpoint "POST" "/auth/register" 422 "Register with a too-short password" \
+    '{"email":"short@example.com","password":"short","name":"Short","phone":"1234567890"}'
+
+# Past bcrypt's 72-byte limit, which used to surface as a 500.
+LONG_PASSWORD=$(python3 -c "print('a'*80)")
+test_endpoint "POST" "/auth/register" 422 "Register with an over-long password" \
+    "{\"email\":\"long@example.com\",\"password\":\"$LONG_PASSWORD\",\"name\":\"Long\",\"phone\":\"1234567890\"}"
 
 # Login wrong password
 test_endpoint "POST" "/auth/login" 401 "Login with wrong password" \
-    '{"email":"test@example.com","password":"wrongpassword"}' \
+    '{"email":"test@example.com","password":"wrong-horse-battery"}' \
     "$COOKIE_JAR"
 
 # Get current user
@@ -223,7 +232,7 @@ test_endpoint "POST" "/auth/logout" 204 "Logout" "" "$COOKIE_JAR"
 
 # Re-login for subsequent tests
 test_endpoint "POST" "/auth/login" 200 "Re-login after logout" \
-    '{"email":"test@example.com","password":"password123"}' \
+    '{"email":"test@example.com","password":"correct-horse-battery"}' \
     "$COOKIE_JAR"
 echo ""
 
@@ -234,7 +243,7 @@ echo -e "${YELLOW}--- Setup Admin ---${NC}"
 
 # Register admin
 test_endpoint "POST" "/auth/register" 201 "Register admin user" \
-    '{"email":"admin@example.com","password":"admin123","name":"Admin User","phone":"9876543210"}' \
+    '{"email":"admin@example.com","password":"admin-horse-battery","name":"Admin User","phone":"9876543210"}' \
     "$ADMIN_COOKIE_JAR"
 
 # Make admin in DB
@@ -245,7 +254,7 @@ test_endpoint "POST" "/auth/logout" 204 "Logout admin" "" "$ADMIN_COOKIE_JAR"
 
 # Login as admin (will get new token with admin role)
 test_endpoint "POST" "/auth/login" 200 "Login as admin" \
-    '{"email":"admin@example.com","password":"admin123"}' \
+    '{"email":"admin@example.com","password":"admin-horse-battery"}' \
     "$ADMIN_COOKIE_JAR"
 echo ""
 
@@ -253,7 +262,7 @@ echo ""
 # Re-login as regular user for customer tests
 # ============================================
 test_endpoint "POST" "/auth/login" 200 "Re-login as regular user" \
-    '{"email":"test@example.com","password":"password123"}' \
+    '{"email":"test@example.com","password":"correct-horse-battery"}' \
     "$COOKIE_JAR"
 echo ""
 
@@ -386,6 +395,15 @@ test_endpoint "POST" "/orders" 201 "Create guest order" \
 # List orders
 test_endpoint "GET" "/orders" 200 "List orders" "" "$COOKIE_JAR"
 
+# Prices come from the catalogue, so a basket naming a product the shop does
+# not stock is refused rather than stored at a price the client chose.
+test_endpoint "POST" "/orders" 422 "Create order for an unknown product" \
+    '{"userName":"Test User","email":"test@example.com","phone":"1111111111","street":"123 Main St","townOrCity":"Mumbai","state":"Maharashtra","pincode":"400001","deliveryRegion":"West","deliveryLocation":"Mumbai","total":1,"items":[{"productId":999999,"productName":"Ghost","price":1,"quantity":1,"total":1}]}'
+
+# A line asking for no items is refused too.
+test_endpoint "POST" "/orders" 422 "Create order with zero quantity" \
+    '{"userName":"Test User","email":"test@example.com","phone":"1111111111","street":"123 Main St","townOrCity":"Mumbai","state":"Maharashtra","pincode":"400001","deliveryRegion":"West","deliveryLocation":"Mumbai","total":1,"items":[{"productId":1,"productName":"Updated Product","price":1,"quantity":0,"total":1}]}'
+
 # Get order
 test_endpoint "GET" "/orders/1" 200 "Get order" "" "$COOKIE_JAR"
 
@@ -396,6 +414,12 @@ test_endpoint "PUT" "/orders/1" 200 "Update order" \
 
 # Get non-existent order
 test_endpoint "GET" "/orders/999" 404 "Get non-existent order" "" "$COOKIE_JAR"
+
+# The order routes resolve against the calling actor, so an unauthenticated
+# caller gets 401 rather than somebody else's order book.
+test_endpoint "GET" "/orders" 401 "List orders without auth"
+test_endpoint "GET" "/orders/1" 401 "Get order without auth"
+test_endpoint "DELETE" "/orders/1" 401 "Delete order without auth"
 echo ""
 
 # ============================================
@@ -461,9 +485,15 @@ test_endpoint "PATCH" "/admin/orders/1/status" 200 "Update order status to deliv
     "$ADMIN_COOKIE_JAR"
 
 # Invalid status transition
-test_endpoint "PATCH" "/admin/orders/1/status" 400 "Invalid status transition" \
+test_endpoint "PATCH" "/admin/orders/1/status" 422 "Invalid status transition" \
     '{"status":"pending"}' \
     "$ADMIN_COOKIE_JAR"
+
+# A non-admin shopper cannot move an order even with a valid session: the
+# Order module refuses the actor, not just the middleware.
+test_endpoint "PATCH" "/admin/orders/2/status" 403 "Update order status without admin" \
+    '{"status":"confirmed"}' \
+    "$COOKIE_JAR"
 
 # Get non-existent order
 test_endpoint "GET" "/admin/orders/999" 404 "Get non-existent order" "" "$ADMIN_COOKIE_JAR"
@@ -512,6 +542,10 @@ fi
 
 # Get non-existent invoice
 test_endpoint "GET" "/invoices/999" 404 "Get non-existent invoice" "" "$COOKIE_JAR"
+
+# Order 2 was placed with no session, so it belongs to nobody: the shopper
+# cannot pull its invoice, and the fact that it exists is not disclosed.
+test_endpoint "GET" "/invoices/2" 404 "Get another account's invoice" "" "$COOKIE_JAR"
 
 # Get invoice without auth
 test_endpoint "GET" "/invoices/1" 401 "Get invoice without auth"
