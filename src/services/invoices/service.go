@@ -8,18 +8,21 @@ import (
 	"time"
 
 	"github.com/jung-kurt/gofpdf"
+
+	"github.com/thaletto/krcrackers-go/src/services/orders"
 )
 
-// Service owns the business operations for invoice generation: loading
-// the order, deriving and persisting the invoice number, and rendering
-// the PDF. The HTTP layer (apis/invoices) writes the bytes and headers.
+// Service owns the business operations for invoice generation: resolving the
+// order through the Order module, deriving and recording the invoice number,
+// and rendering the PDF. The HTTP layer (apis/invoices) writes the bytes and
+// headers.
 type Service struct {
-	repo Repository
+	orders OrderSource
 }
 
-// NewService creates a new invoices service.
-func NewService(repo Repository) *Service {
-	return &Service{repo: repo}
+// NewService creates a new invoices service over the Order module.
+func NewService(orderSource OrderSource) *Service {
+	return &Service{orders: orderSource}
 }
 
 // GenerateResult bundles the PDF bytes with a suggested filename.
@@ -28,24 +31,25 @@ type GenerateResult struct {
 	Filename string
 }
 
-// GeneratePDF loads the order, ensures it has an invoice number, and
-// renders the PDF. Returns ErrOrderNotFound if the order does not exist.
-func (s *Service) GeneratePDF(ctx context.Context, orderID int) (GenerateResult, error) {
-	invoice, err := s.repo.GetOrderWithItems(ctx, orderID)
+// GeneratePDF renders the invoice for an order the actor may see. The lookup
+// and the invoice-number write both go through the Order module, so an
+// actor who cannot see the order cannot obtain its invoice. Returns
+// apperrors.ErrNotFound when the order does not exist or is out of scope.
+func (s *Service) GeneratePDF(ctx context.Context, actor orders.Actor, orderID int) (GenerateResult, error) {
+	view, err := s.orders.InvoiceView(ctx, actor, orderID)
 	if err != nil {
 		return GenerateResult{}, err
 	}
 
-	if invoice.Number == "" {
-		invoiceNumber := formatInvoiceNumber(orderID)
-		if err := s.repo.SaveInvoiceNumber(ctx, orderID, invoiceNumber); err != nil {
+	number := view.Number
+	if number == "" {
+		number = formatInvoiceNumber(orderID)
+		if err := s.orders.AssignInvoiceNumber(ctx, actor, orderID, number); err != nil {
 			return GenerateResult{}, fmt.Errorf("save invoice number: %w", err)
 		}
-		invoice.Number = invoiceNumber
 	}
-	invoice.Date = time.Now()
 
-	pdf := generatePDF(invoice)
+	pdf := generatePDF(render(view, number, time.Now()))
 	return GenerateResult{
 		PDF:      pdf,
 		Filename: fmt.Sprintf("invoice-%d.pdf", orderID),

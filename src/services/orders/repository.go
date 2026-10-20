@@ -3,24 +3,59 @@ package orders
 import (
 	"context"
 	"fmt"
+	"time"
 
-	apperrors "github.com/thaletto/krcrackers-go/src/errors"
 	"github.com/thaletto/krcrackers-go/src/database"
+	apperrors "github.com/thaletto/krcrackers-go/src/errors"
 )
 
+// orderColumns is the single projection of the orders table. Every read uses
+// it so the column list and rowToOrder cannot drift apart; adding a column
+// here is a one-line change rather than a search across five queries.
+const orderColumns = `id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, ` +
+	`notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at`
+
+// orderItemColumns is the single projection of the order_items table.
+const orderItemColumns = `id, product_id, product_name, price, quantity, total`
+
 // Repository defines the data access interface for orders.
+//
+// Every method that reads or writes a single order takes a Scope, so the
+// ownership check is part of the query rather than something a caller
+// remembers to apply. There is deliberately no unscoped variant.
 type Repository interface {
-	Create(ctx context.Context, input OrderInput) (Order, error)
-	List(ctx context.Context, limit, offset int) (ListOrdersResponse, error)
-	Get(ctx context.Context, id int) (Order, error)
-	Update(ctx context.Context, id int, input OrderInput) (Order, error)
-	Delete(ctx context.Context, id int) error
-	Checkout(ctx context.Context, input OrderInput) (Order, error)
-	ListForUser(ctx context.Context, userID int, limit, offset int) (ListOrdersResponse, error)
-	GetForUser(ctx context.Context, orderID, userID int) (Order, error)
-	UpdateStatus(ctx context.Context, orderID int, status OrderStatus) (Order, error)
-	ListAllFilter(ctx context.Context, status string, limit, offset int) (ListOrdersResponse, error)
-	GetDashboardStats(ctx context.Context) (DashboardStats, error)
+	// Insert persists a new order header and its items in one transaction.
+	Insert(ctx context.Context, input OrderInput) (Order, error)
+
+	// List returns a page of orders visible within the scope, newest first.
+	List(ctx context.Context, filter ListFilter, scope Scope) (ListOrdersResponse, error)
+
+	// Get returns one order visible within the scope, or
+	// apperrors.ErrNotFound if it does not exist or is out of scope.
+	Get(ctx context.Context, id int, scope Scope) (Order, error)
+
+	// Update replaces the mutable fields and the line items of one order
+	// within the scope.
+	Update(ctx context.Context, id int, input OrderInput, scope Scope) (Order, error)
+
+	// Delete removes one order and its items within the scope.
+	Delete(ctx context.Context, id int, scope Scope) error
+
+	// UpdateStatus moves one order to a new status within the scope,
+	// refusing a transition the lifecycle does not allow.
+	UpdateStatus(ctx context.Context, id int, status OrderStatus, scope Scope) (Order, error)
+
+	// InvoiceView returns the flat order snapshot an invoice renders,
+	// resolved against the scope.
+	InvoiceView(ctx context.Context, id int, scope Scope) (InvoiceView, error)
+
+	// AssignInvoiceNumber records the invoice number minted for an order
+	// within the scope.
+	AssignInvoiceNumber(ctx context.Context, id int, number string, scope Scope) error
+
+	// DashboardStats aggregates figures across every order since the given
+	// time. It is administrator-only and therefore unscoped by design.
+	DashboardStats(ctx context.Context, since time.Time) (DashboardStats, error)
 }
 
 type repo struct {
@@ -32,7 +67,7 @@ func NewRepository(db database.DB) Repository {
 	return &repo{db: db}
 }
 
-func (r *repo) Create(ctx context.Context, input OrderInput) (Order, error) {
+func (r *repo) Insert(ctx context.Context, input OrderInput) (Order, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return Order{}, fmt.Errorf("begin tx: %w", err)
@@ -44,62 +79,49 @@ func (r *repo) Create(ctx context.Context, input OrderInput) (Order, error) {
 	}
 
 	// user_id is nullable: it stays NULL for guest checkout and is what
-	// /orders/my filters on, so an order placed by a signed-in shopper only
+	// orders.Scope filters on, so an order placed by a signed-in shopper only
 	// appears in their history when it is recorded here.
 	res, err := tx.Execute(ctx, `
-		INSERT INTO orders (user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, status)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, input.UserID, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, string(status))
+		INSERT INTO orders (status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference)
+		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+	`, string(status), input.UserID, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, input.PaymentScreenshotURL, input.PaymentReference)
 	if err != nil {
 		_ = tx.Rollback()
 		return Order{}, fmt.Errorf("insert order: %w", err)
 	}
 	orderID := int(res.LastInsertID)
 
-	items := make([]OrderItem, 0, len(input.Items))
-	for i, item := range input.Items {
-		itemRes, err := tx.Execute(ctx, `
-			INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, orderID, item.ProductID, item.ProductName, item.Price, item.Quantity, item.Total)
-		if err != nil {
-			_ = tx.Rollback()
-			return Order{}, fmt.Errorf("insert order item: %w", err)
-		}
-		items = append(items, OrderItem{
-			ID:              int(itemRes.LastInsertID),
-			OrderItemFields: input.Items[i],
-		})
+	if _, err := insertItems(ctx, tx, orderID, input.Items); err != nil {
+		_ = tx.Rollback()
+		return Order{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
 		return Order{}, fmt.Errorf("commit tx: %w", err)
 	}
 
-	return Order{ID: orderID, OrderFields: input.OrderFields, Items: items}, nil
+	// Re-read rather than echoing the input: the stored row carries the
+	// status default, the timestamps and the item ids the caller cannot know.
+	// Insert is reachable only by the module itself, so AnyOrder is correct.
+	return r.Get(ctx, orderID, AnyOrder())
 }
 
-func (r *repo) List(ctx context.Context, limit, offset int) (ListOrdersResponse, error) {
-	query := `
-		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at,
-			COUNT(*) OVER() AS total_count
-		FROM orders ORDER BY id DESC
-	`
-	var queryArgs []any
-	if limit > 0 {
-		query += " LIMIT ? OFFSET ?"
-		queryArgs = append(queryArgs, limit, offset)
+func (r *repo) List(ctx context.Context, filter ListFilter, scope Scope) (ListOrdersResponse, error) {
+	where, args := scope.clause()
+	if filter.Status != "" {
+		where += " AND status = ?"
+		args = append(args, filter.Status)
 	}
 
-	rows, err := r.db.Query(ctx, query, queryArgs...)
+	query := `SELECT ` + orderColumns + `, COUNT(*) OVER() AS total_count FROM orders WHERE ` + where + ` ORDER BY id DESC`
+	if filter.Limit > 0 {
+		query += " LIMIT ? OFFSET ?"
+		args = append(args, filter.Limit, filter.Offset)
+	}
+
+	rows, err := r.db.Query(ctx, query, args...)
 	if err != nil {
 		return ListOrdersResponse{}, fmt.Errorf("list orders: %w", err)
-	}
-
-	var limitPtr, offsetPtr *int
-	if limit > 0 {
-		limitPtr = &limit
-		offsetPtr = &offset
 	}
 
 	total := 0
@@ -109,26 +131,31 @@ func (r *repo) List(ctx context.Context, limit, offset int) (ListOrdersResponse,
 		}
 	}
 
-	items := make([]Order, 0, len(rows))
+	orders := make([]Order, 0, len(rows))
 	for _, row := range rows {
 		o, err := rowToOrder(row)
 		if err != nil {
 			return ListOrdersResponse{}, fmt.Errorf("scan order: %w", err)
 		}
-		items = append(items, o)
+		orders = append(orders, o)
 	}
-	populated, err := r.withItems(ctx, items)
+	populated, err := r.withItems(ctx, orders)
 	if err != nil {
 		return ListOrdersResponse{}, err
+	}
+
+	var limitPtr, offsetPtr *int
+	if filter.Limit > 0 {
+		limit := filter.Limit
+		offset := filter.Offset
+		limitPtr, offsetPtr = &limit, &offset
 	}
 	return ListOrdersResponse{Items: populated, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
 }
 
-func (r *repo) Get(ctx context.Context, id int) (Order, error) {
-	rows, err := r.db.Query(ctx, `
-		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
-		FROM orders WHERE id = ?
-	`, id)
+func (r *repo) Get(ctx context.Context, id int, scope Scope) (Order, error) {
+	where, args := scope.predicate(id)
+	rows, err := r.db.Query(ctx, `SELECT `+orderColumns+` FROM orders WHERE `+where, args...)
 	if err != nil {
 		return Order{}, fmt.Errorf("get order %d: %w", id, err)
 	}
@@ -140,38 +167,27 @@ func (r *repo) Get(ctx context.Context, id int) (Order, error) {
 	if err != nil {
 		return Order{}, err
 	}
-
-	itemRows, err := r.db.Query(ctx, `
-		SELECT id, product_id, product_name, price, quantity, total
-		FROM order_items WHERE order_id = ? ORDER BY id
-	`, id)
+	order.Items, err = r.itemsFor(ctx, id)
 	if err != nil {
 		return Order{}, fmt.Errorf("get order items %d: %w", id, err)
 	}
-
-	order.Items = make([]OrderItem, 0, len(itemRows))
-	for _, row := range itemRows {
-		item, err := rowToOrderItem(row)
-		if err != nil {
-			return Order{}, err
-		}
-		order.Items = append(order.Items, item)
-	}
-
 	return order, nil
 }
 
-func (r *repo) Update(ctx context.Context, id int, input OrderInput) (Order, error) {
+func (r *repo) Update(ctx context.Context, id int, input OrderInput, scope Scope) (Order, error) {
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return Order{}, fmt.Errorf("begin tx: %w", err)
 	}
 
+	where, _ := scope.predicate(id)
 	res, err := tx.Execute(ctx, `
 		UPDATE orders
 		SET user_name = ?, email = ?, phone = ?, street = ?, town_or_city = ?, state = ?, pincode = ?, notes = ?, delivery_region = ?, delivery_location = ?, total = ?
-		WHERE id = ?
-	`, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, id)
+		WHERE `+where, scope.writeParams(id,
+		input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity,
+		input.State, input.Pincode, input.Notes, input.DeliveryRegion,
+		input.DeliveryLocation, input.Total)...)
 	if err != nil {
 		_ = tx.Rollback()
 		return Order{}, fmt.Errorf("update order %d: %w", id, err)
@@ -181,306 +197,200 @@ func (r *repo) Update(ctx context.Context, id int, input OrderInput) (Order, err
 		return Order{}, fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
 	}
 
-	_, err = tx.Execute(ctx, `DELETE FROM order_items WHERE order_id = ?`, id)
-	if err != nil {
+	if _, err := tx.Execute(ctx, `DELETE FROM order_items WHERE order_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return Order{}, fmt.Errorf("delete order items %d: %w", id, err)
 	}
 
-	items := make([]OrderItem, 0, len(input.Items))
-	for i, item := range input.Items {
-		itemRes, err := tx.Execute(ctx, `
-			INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, id, item.ProductID, item.ProductName, item.Price, item.Quantity, item.Total)
-		if err != nil {
-			_ = tx.Rollback()
-			return Order{}, fmt.Errorf("insert order item: %w", err)
-		}
-		items = append(items, OrderItem{
-			ID:              int(itemRes.LastInsertID),
-			OrderItemFields: input.Items[i],
-		})
+	if _, err := insertItems(ctx, tx, id, input.Items); err != nil {
+		_ = tx.Rollback()
+		return Order{}, err
 	}
 
 	if err := tx.Commit(); err != nil {
 		return Order{}, fmt.Errorf("commit tx: %w", err)
 	}
 
-	return Order{ID: id, OrderFields: input.OrderFields, Items: items}, nil
+	// Re-read for the same reason Insert does: the response should be the row
+	// as stored, not the request that produced it.
+	return r.Get(ctx, id, scope)
 }
 
-func (r *repo) Delete(ctx context.Context, id int) error {
+func (r *repo) Delete(ctx context.Context, id int, scope Scope) error {
+	where, args := scope.predicate(id)
+
+	// Confirm the order is in scope before removing anything. The line items
+	// have to go before the header — order_items.order_id is a foreign key
+	// with no ON DELETE CASCADE and foreign keys are enforced — so an
+	// out-of-scope delete that reached the item delete would destroy another
+	// account's order on a backend whose rollback cannot restore a DELETE.
+	owned, err := r.db.Query(ctx, `SELECT id FROM orders WHERE `+where, args...)
+	if err != nil {
+		return fmt.Errorf("find order %d: %w", id, err)
+	}
+	if len(owned) == 0 {
+		return fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
+	}
+
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return fmt.Errorf("begin tx: %w", err)
 	}
 
-	_, err = tx.Execute(ctx, `DELETE FROM order_items WHERE order_id = ?`, id)
-	if err != nil {
+	if _, err := tx.Execute(ctx, `DELETE FROM order_items WHERE order_id = ?`, id); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("delete order items %d: %w", id, err)
 	}
 
-	res, err := tx.Execute(ctx, `DELETE FROM orders WHERE id = ?`, id)
-	if err != nil {
+	if _, err := tx.Execute(ctx, `DELETE FROM orders WHERE `+where, args...); err != nil {
 		_ = tx.Rollback()
 		return fmt.Errorf("delete order %d: %w", id, err)
-	}
-	if res.RowsAffected == 0 {
-		_ = tx.Rollback()
-		return fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
 	}
 
 	return tx.Commit()
 }
 
-func (r *repo) Checkout(ctx context.Context, input OrderInput) (Order, error) {
+func (r *repo) UpdateStatus(ctx context.Context, id int, status OrderStatus, scope Scope) (Order, error) {
+	where, args := scope.predicate(id)
+
 	tx, err := r.db.Begin(ctx)
 	if err != nil {
 		return Order{}, fmt.Errorf("begin tx: %w", err)
 	}
 
-	status := input.Status
-	if status == "" {
-		status = StatusPending
-	}
-
-	res, err := tx.Execute(ctx, `
-		INSERT INTO orders (status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference)
-		VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-	`, string(status), input.UserID, input.UserName, input.Email, input.Phone, input.Street, input.TownOrCity, input.State, input.Pincode, input.Notes, input.DeliveryRegion, input.DeliveryLocation, input.Total, input.PaymentScreenshotURL, input.PaymentReference)
+	// Read and write inside one transaction so two concurrent transitions
+	// cannot both pass the guard and have the second overwrite the first.
+	statusRows, err := tx.Query(ctx, `SELECT status FROM orders WHERE `+where, args...)
 	if err != nil {
 		_ = tx.Rollback()
-		return Order{}, fmt.Errorf("insert order: %w", err)
+		return Order{}, fmt.Errorf("read order status %d: %w", id, err)
 	}
-	orderID := int(res.LastInsertID)
+	if len(statusRows) == 0 {
+		_ = tx.Rollback()
+		return Order{}, fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
+	}
+	current, err := statusRows[0].String("status")
+	if err != nil {
+		_ = tx.Rollback()
+		return Order{}, err
+	}
+	if !isValidTransition(OrderStatus(current), status) {
+		_ = tx.Rollback()
+		return Order{}, fmt.Errorf("%w: from %s to %s", ErrInvalidStatusTransition, current, status)
+	}
 
-	items := make([]OrderItem, 0, len(input.Items))
-	for i, item := range input.Items {
-		itemRes, err := tx.Execute(ctx, `
-			INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
-			VALUES (?, ?, ?, ?, ?, ?)
-		`, orderID, item.ProductID, item.ProductName, item.Price, item.Quantity, item.Total)
-		if err != nil {
+	res, err := tx.Execute(ctx, `UPDATE orders SET status = ? WHERE `+where, scope.writeParams(id, string(status))...)
+	if err != nil {
+		_ = tx.Rollback()
+		return Order{}, fmt.Errorf("update order status %d: %w", id, err)
+	}
+	if res.RowsAffected == 0 {
+		_ = tx.Rollback()
+		return Order{}, fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
+	}
+	if status == StatusConfirmed {
+		if _, err := tx.Execute(ctx, `UPDATE orders SET verified_at = CURRENT_TIMESTAMP WHERE `+where, args...); err != nil {
 			_ = tx.Rollback()
-			return Order{}, fmt.Errorf("insert order item: %w", err)
+			return Order{}, fmt.Errorf("stamp order verified_at %d: %w", id, err)
 		}
-		items = append(items, OrderItem{
-			ID:              int(itemRes.LastInsertID),
-			OrderItemFields: input.Items[i],
-		})
 	}
 
 	if err := tx.Commit(); err != nil {
 		return Order{}, fmt.Errorf("commit tx: %w", err)
 	}
 
-	return Order{ID: orderID, OrderFields: input.OrderFields, Items: items}, nil
+	// Re-read outside the transaction so the caller sees the stored row
+	// rather than a value assembled from the input.
+	return r.Get(ctx, id, scope)
 }
 
-// withItems loads order_items for every order in a list response.
-// List queries select from orders only, so without this the Items field
-// stays empty and callers (e.g. item counts) report zero.
-func (r *repo) withItems(ctx context.Context, orders []Order) ([]Order, error) {
-	for i, o := range orders {
-		itemRows, err := r.db.Query(ctx, `
-			SELECT id, product_id, product_name, price, quantity, total
-			FROM order_items WHERE order_id = ? ORDER BY id
-		`, o.ID)
-		if err != nil {
-			return nil, err
-		}
-		items := make([]OrderItem, 0, len(itemRows))
-		for _, row := range itemRows {
-			item, err := rowToOrderItem(row)
-			if err != nil {
-				return nil, err
-			}
-			items = append(items, item)
-		}
-		orders[i].Items = items
-	}
-	return orders, nil
-}
-
-func (r *repo) ListForUser(ctx context.Context, userID int, limit, offset int) (ListOrdersResponse, error) {
-	query := `
-		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at,
-			COUNT(*) OVER() AS total_count
-		FROM orders WHERE user_id = ? ORDER BY id DESC
-	`
-	var args []any
-	args = append(args, userID)
-	if limit > 0 {
-		query += " LIMIT ? OFFSET ?"
-		args = append(args, limit, offset)
-	}
-
-	rows, err := r.db.Query(ctx, query, args...)
-	if err != nil {
-		return ListOrdersResponse{}, err
-	}
-
-	var limitPtr, offsetPtr *int
-	if limit > 0 {
-		limitPtr = &limit
-		offsetPtr = &offset
-	}
-
-	total := 0
-	if len(rows) > 0 {
-		if v, err := rows[0].Int("total_count"); err == nil {
-			total = int(v)
-		}
-	}
-
-	orders := make([]Order, 0, len(rows))
-	for _, row := range rows {
-		o, err := rowToOrder(row)
-		if err != nil {
-			return ListOrdersResponse{}, err
-		}
-		orders = append(orders, o)
-	}
-	populated, err := r.withItems(ctx, orders)
-	if err != nil {
-		return ListOrdersResponse{}, err
-	}
-	return ListOrdersResponse{Items: populated, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
-}
-
-func (r *repo) GetForUser(ctx context.Context, orderID, userID int) (Order, error) {
+func (r *repo) InvoiceView(ctx context.Context, id int, scope Scope) (InvoiceView, error) {
+	where, args := scope.predicate(id)
 	rows, err := r.db.Query(ctx, `
-		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at
-		FROM orders WHERE id = ? AND user_id = ?
-	`, orderID, userID)
+		SELECT id, invoice_number, user_name, email, phone, street, town_or_city, state, pincode, total
+		FROM orders WHERE `+where, args...)
 	if err != nil {
-		return Order{}, err
+		return InvoiceView{}, fmt.Errorf("invoice view %d: %w", id, err)
 	}
 	if len(rows) == 0 {
-		return Order{}, fmt.Errorf("order %d: %w", orderID, apperrors.ErrNotFound)
+		return InvoiceView{}, fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
+	}
+	row := rows[0]
+
+	view := InvoiceView{}
+	if view.OrderID, err = rowInt(row, "id"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.Number, err = rowString(row, "invoice_number"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.UserName, err = rowString(row, "user_name"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.Email, err = rowString(row, "email"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.Phone, err = rowString(row, "phone"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.Street, err = rowString(row, "street"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.TownOrCity, err = rowString(row, "town_or_city"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.State, err = rowString(row, "state"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.Pincode, err = rowString(row, "pincode"); err != nil {
+		return InvoiceView{}, err
+	}
+	if view.Total, err = row.Float("total"); err != nil {
+		return InvoiceView{}, err
 	}
 
-	order, err := rowToOrder(rows[0])
+	itemRows, err := r.itemsFor(ctx, id)
 	if err != nil {
-		return Order{}, err
+		return InvoiceView{}, fmt.Errorf("invoice items %d: %w", id, err)
 	}
-
-	itemRows, err := r.db.Query(ctx, `
-		SELECT id, product_id, product_name, price, quantity, total
-		FROM order_items WHERE order_id = ? ORDER BY id
-	`, orderID)
-	if err != nil {
-		return Order{}, err
+	view.Items = make([]InvoiceLine, 0, len(itemRows))
+	for _, item := range itemRows {
+		view.Items = append(view.Items, InvoiceLine{
+			ProductName: item.ProductName,
+			Quantity:    item.Quantity,
+			Price:       item.Price,
+			Total:       item.Total,
+		})
 	}
-
-	order.Items = make([]OrderItem, 0, len(itemRows))
-	for _, row := range itemRows {
-		item, err := rowToOrderItem(row)
-		if err != nil {
-			return Order{}, err
-		}
-		order.Items = append(order.Items, item)
-	}
-
-	return order, nil
+	return view, nil
 }
 
-func (r *repo) UpdateStatus(ctx context.Context, orderID int, status OrderStatus) (Order, error) {
-	statusRows, err := r.db.Query(ctx, `SELECT status FROM orders WHERE id = ?`, orderID)
+func (r *repo) AssignInvoiceNumber(ctx context.Context, id int, number string, scope Scope) error {
+	where, _ := scope.predicate(id)
+	res, err := r.db.Execute(ctx, `UPDATE orders SET invoice_number = ? WHERE `+where, scope.writeParams(id, number)...)
 	if err != nil {
-		return Order{}, err
+		return fmt.Errorf("save invoice number %d: %w", id, err)
 	}
-	if len(statusRows) == 0 {
-		return Order{}, fmt.Errorf("order %d: %w", orderID, apperrors.ErrNotFound)
+	if res.RowsAffected == 0 {
+		return fmt.Errorf("order %d: %w", id, apperrors.ErrNotFound)
 	}
-	current, err := statusRows[0].String("status")
-	if err != nil {
-		return Order{}, err
-	}
-
-	if !isValidTransition(OrderStatus(current), status) {
-		return Order{}, fmt.Errorf("invalid status transition from %s to %s", current, status)
-	}
-
-	_, err = r.db.Execute(ctx, `UPDATE orders SET status = ? WHERE id = ?`, string(status), orderID)
-	if err != nil {
-		return Order{}, err
-	}
-
-	if status == StatusConfirmed {
-		_, _ = r.db.Execute(ctx, `UPDATE orders SET verified_at = CURRENT_TIMESTAMP WHERE id = ?`, orderID)
-	}
-
-	return r.Get(ctx, orderID)
+	return nil
 }
 
-func (r *repo) ListAllFilter(ctx context.Context, status string, limit, offset int) (ListOrdersResponse, error) {
-	where := "1=1"
-	var args []any
-	if status != "" {
-		where = "status = ?"
-		args = append(args, status)
-	}
-
-	query := `
-		SELECT id, status, user_id, user_name, email, phone, street, town_or_city, state, pincode, notes, delivery_region, delivery_location, total, payment_screenshot_url, payment_reference, created_at,
-			COUNT(*) OVER() AS total_count
-		FROM orders WHERE ` + where + ` ORDER BY id DESC
-	`
-	var queryArgs = make([]any, len(args))
-	copy(queryArgs, args)
-	if limit > 0 {
-		query += " LIMIT ? OFFSET ?"
-		queryArgs = append(queryArgs, limit, offset)
-	}
-
-	rows, err := r.db.Query(ctx, query, queryArgs...)
-	if err != nil {
-		return ListOrdersResponse{}, err
-	}
-
-	var limitPtr, offsetPtr *int
-	if limit > 0 {
-		limitPtr = &limit
-		offsetPtr = &offset
-	}
-
-	total := 0
-	if len(rows) > 0 {
-		if v, err := rows[0].Int("total_count"); err == nil {
-			total = int(v)
-		}
-	}
-
-	orders := make([]Order, 0, len(rows))
-	for _, row := range rows {
-		o, err := rowToOrder(row)
-		if err != nil {
-			return ListOrdersResponse{}, err
-		}
-		orders = append(orders, o)
-	}
-	populated, err := r.withItems(ctx, orders)
-	if err != nil {
-		return ListOrdersResponse{}, err
-	}
-	return ListOrdersResponse{Items: populated, Total: total, Limit: limitPtr, Offset: offsetPtr}, nil
-}
-
-func (r *repo) GetDashboardStats(ctx context.Context) (DashboardStats, error) {
+func (r *repo) DashboardStats(ctx context.Context, since time.Time) (DashboardStats, error) {
 	var stats DashboardStats
 
+	// One round trip over the orders table, which this module owns. The
+	// new-customer figure is the Account module's to count; the caller
+	// composes it in rather than this module reaching into users.
 	rows, err := r.db.Query(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM orders) AS total_orders,
 			(SELECT COUNT(*) FROM orders WHERE status = 'pending') AS pending_orders,
-			(SELECT COALESCE(SUM(total), 0.0) FROM orders WHERE created_at >= date('now', 'start of month')) AS revenue_month,
-			(SELECT COUNT(*) FROM users WHERE created_at >= date('now', 'start of month')) AS new_customers
-	`)
+			(SELECT COALESCE(SUM(total), 0.0) FROM orders WHERE created_at >= ?) AS revenue_month
+	`, since.UTC().Format(time.DateTime))
 	if err != nil {
-		return stats, err
+		return stats, fmt.Errorf("dashboard stats: %w", err)
 	}
 	if len(rows) == 0 {
 		return stats, nil
@@ -494,11 +404,58 @@ func (r *repo) GetDashboardStats(ctx context.Context) (DashboardStats, error) {
 	if v, err := rows[0].Float("revenue_month"); err == nil {
 		stats.RevenueMonth = v
 	}
-	if v, err := rows[0].Int("new_customers"); err == nil {
-		stats.NewCustomers = int(v)
-	}
 
 	return stats, nil
+}
+
+// insertItems writes every line item of an order inside an open transaction.
+func insertItems(ctx context.Context, tx database.Tx, orderID int, fields []OrderItemFields) ([]OrderItem, error) {
+	items := make([]OrderItem, 0, len(fields))
+	for i, item := range fields {
+		itemRes, err := tx.Execute(ctx, `
+			INSERT INTO order_items (order_id, product_id, product_name, price, quantity, total)
+			VALUES (?, ?, ?, ?, ?, ?)
+		`, orderID, item.ProductID, item.ProductName, item.Price, item.Quantity, item.Total)
+		if err != nil {
+			return nil, fmt.Errorf("insert order item: %w", err)
+		}
+		items = append(items, OrderItem{
+			ID:              int(itemRes.LastInsertID),
+			OrderItemFields: fields[i],
+		})
+	}
+	return items, nil
+}
+
+// itemsFor loads the line items of one order.
+func (r *repo) itemsFor(ctx context.Context, orderID int) ([]OrderItem, error) {
+	rows, err := r.db.Query(ctx, `SELECT `+orderItemColumns+` FROM order_items WHERE order_id = ? ORDER BY id`, orderID)
+	if err != nil {
+		return nil, err
+	}
+	items := make([]OrderItem, 0, len(rows))
+	for _, row := range rows {
+		item, err := rowToOrderItem(row)
+		if err != nil {
+			return nil, err
+		}
+		items = append(items, item)
+	}
+	return items, nil
+}
+
+// withItems loads order_items for every order in a list response.
+// List queries select from orders only, so without this the Items field
+// stays empty and callers (e.g. item counts) report zero.
+func (r *repo) withItems(ctx context.Context, orders []Order) ([]Order, error) {
+	for i, o := range orders {
+		items, err := r.itemsFor(ctx, o.ID)
+		if err != nil {
+			return nil, err
+		}
+		orders[i].Items = items
+	}
+	return orders, nil
 }
 
 var validTransitions = map[OrderStatus][]OrderStatus{
@@ -529,6 +486,8 @@ func rowToOrder(row database.Row) (Order, error) {
 	if err != nil {
 		statusStr = "pending"
 	}
+	// user_id is NULL for a guest order, so a read failure and a null read
+	// both mean "unowned" rather than an error.
 	var userID *int
 	if userIDVal, err := row.Int("user_id"); err == nil && userIDVal > 0 {
 		uid := int(userIDVal)
@@ -649,4 +608,20 @@ func rowToOrderItem(row database.Row) (OrderItem, error) {
 			Total:       total,
 		},
 	}, nil
+}
+
+func rowInt(row database.Row, col string) (int, error) {
+	v, err := row.Int(col)
+	if err != nil {
+		return 0, fmt.Errorf("read %s: %w", col, err)
+	}
+	return int(v), nil
+}
+
+func rowString(row database.Row, col string) (string, error) {
+	v, err := row.String(col)
+	if err != nil {
+		return "", fmt.Errorf("read %s: %w", col, err)
+	}
+	return v, nil
 }

@@ -8,8 +8,9 @@ package invoices
 
 import (
 	"context"
-	"fmt"
 	"time"
+
+	"github.com/thaletto/krcrackers-go/src/services/orders"
 )
 
 // InvoiceItem represents a line item on an invoice.
@@ -37,12 +38,40 @@ type Invoice struct {
 	Total         float64       `json:"total"`
 }
 
-// Repository defines the data access interface for invoice data.
-type Repository interface {
-	GetOrderWithItems(ctx context.Context, orderID int) (Invoice, error)
-	SaveInvoiceNumber(ctx context.Context, orderID int, invoiceNumber string) error
+// OrderSource is the seam onto the Order module. The Invoice module never
+// queries the orders table: it asks for an order already resolved against
+// the calling actor, and asks the Order module to record the number it
+// mints. Ownership is therefore decided in one place.
+type OrderSource interface {
+	InvoiceView(ctx context.Context, actor orders.Actor, orderID int) (orders.InvoiceView, error)
+	AssignInvoiceNumber(ctx context.Context, actor orders.Actor, orderID int, number string) error
 }
 
-// ErrOrderNotFound is returned by Service.GeneratePDF when the order
-// does not exist.
-var ErrOrderNotFound = fmt.Errorf("order not found")
+// render maps an order snapshot onto the invoice the PDF generator draws.
+// The naming changes are the only translation; no field is invented here.
+func render(view orders.InvoiceView, number string, date time.Time) Invoice {
+	inv := Invoice{
+		Number:        number,
+		Date:          date,
+		OrderID:       view.OrderID,
+		CustomerName:  view.UserName,
+		CustomerEmail: view.Email,
+		CustomerPhone: view.Phone,
+		Street:        view.Street,
+		City:          view.TownOrCity,
+		State:         view.State,
+		Pincode:       view.Pincode,
+		Total:         view.Total,
+		Items:         make([]InvoiceItem, 0, len(view.Items)),
+	}
+	for _, line := range view.Items {
+		inv.Items = append(inv.Items, InvoiceItem{
+			ProductName: line.ProductName,
+			Quantity:    line.Quantity,
+			UnitPrice:   line.Price,
+			LineTotal:   line.Total,
+		})
+	}
+	inv.Subtotal = view.Total
+	return inv
+}

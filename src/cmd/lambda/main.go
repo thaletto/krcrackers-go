@@ -74,14 +74,19 @@ func newHandler(db database.DB, cfg *config.Config) http.Handler {
 	productsSvc := productsSvc.NewService(productsSvc.NewRepository(db), bus)
 	productsHandler := products.NewHandler(productsSvc)
 
-	userAdapter := &adapters.UserProviderAdapter{Repo: authRepo}
-	addrAdapter := &adapters.AddressProviderAdapter{DB: db}
+	userAdapter := &adapters.UserProviderAdapter{Accounts: authSvc}
+	addrAdapter := &adapters.AddressProviderAdapter{Addresses: customersSvc}
+	catalogue := &adapters.ProductCatalogueAdapter{Products: productsSvc}
 	ordersRepo := orders.NewRepository(db)
-	ordersSvc := orders.NewService(ordersRepo, userAdapter, addrAdapter, uploadSvc, bus)
-	ordersHandler := ordersapi.NewHandler(ordersSvc)
+	ordersSvc := orders.NewService(ordersRepo, orders.Intake{
+		Shoppers:  userAdapter,
+		Addresses: addrAdapter,
+		Catalogue: catalogue,
+		Uploads:   uploadSvc,
+	}, bus)
+	ordersHandler := ordersapi.NewHandler(ordersSvc, authSvc)
 
-	invoicesRepo := invoices.NewRepository(db)
-	invoicesSvc := invoices.NewService(invoicesRepo)
+	invoicesSvc := invoices.NewService(ordersSvc)
 	invoicesHandler := invoicesapi.NewHandler(invoicesSvc)
 
 	authHandler.RegisterRoutes(mux)
