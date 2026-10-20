@@ -105,6 +105,6 @@ docs:                ## Build and serve docs site
 	cd docs && bun install && bun run build && bun run start
 
 docs-update:         ## Regenerate OpenAPI spec, build, and serve docs
-	$(SWAG) init --output ./docs/openapi --outputTypes json --parseInternal
+	$(SWAG) init --dir ./src --generalInfo main.go --output ./docs/openapi --outputTypes json --parseInternal
 	npx swagger2openapi docs/openapi/swagger.json -o docs/openapi/openapi.json 2>/dev/null
 	cd docs && bun install && bun run build && bun run start
